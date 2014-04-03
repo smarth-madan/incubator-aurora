@@ -23,7 +23,9 @@ apply plugin: 'java'
 apply plugin: 'license'
 apply plugin: 'maven-publish'
 apply plugin: 'project-report'
+apply plugin: 'jetty'
 apply plugin: 'versions'
+apply plugin: 'war'
 
 buildscript {
   repositories {
@@ -339,6 +341,11 @@ run {
     '-testing_isolated_scheduler=true',
     '-testing_log_file_path=/tmp/testing_log_file',
   ]
+}
+
+
+jettyRun{
+    classpath += sourceSets.generated.output
 }
 
 tasks.withType(nl.javadude.gradle.plugins.license.License).each { licenseTask ->
