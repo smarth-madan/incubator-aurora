@@ -4,14 +4,11 @@
     <title>Aurora Client</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Bootstrap -->
-    <link href="css/bootstrap.min.css" rel="stylesheet" media="screen">
-    <link href="css/bootstrap.css" rel="stylesheet">
-    <style>
-        body {
-        padding-top: 60px; /* 60px to make the container go all the way to the bottom of the topbar */
-        }
-    </style>
-    <link href="css/bootstrap-responsive.css" rel="stylesheet">
+    <link href="lib/bootstrap/css/bootstrap.min.css" rel="stylesheet" media="screen">
+    <link href="lib/bootstrap/css/bootstrap.css" rel="stylesheet">
+    <link href="lib/bootstrap/css/bootstrap-responsive.css" rel="stylesheet">
+
+    <link href="css/styles.css" rel="stylesheet">
 
     <!-- HTML5 shim, for IE6-8 support of HTML5 elements -->
     <!--[if lt IE 9]>
@@ -28,7 +25,7 @@
 <body>
 
 <body>
-
+    
 <div class="navbar navbar-inverse navbar-fixed-top">
     <div class="navbar-inner">
         <div class="container">
@@ -105,7 +102,22 @@
                         <textarea id="execConfig" rows="3" cols="50">{"priority": 0, "task": {"processes": [{"daemon": false, "name": "hello", "ephemeral": false, "max_failures": 1, "min_duration": 5, "cmdline": "\n    while true; do\n      echo hello world\n      sleep 10\n    done\n  ", "final": false}], "name": "hello", "finalization_wait": 30, "max_failures": 1, "max_concurrency": 0, "resources": {"disk": 134217728, "ram": 134217728, "cpu": 1.0}, "constraints": [{"order": ["hello"]}]}, "name": "hello", "environment": "prod", "max_task_failures": 1, "enable_hooks": false, "cluster": "example", "production": false, "role": "vagrant"}</textarea>
                     </div>
                 </div>
-
+								
+								<div class="control-group">
+                    <label class="control-label" for="execConfig">Execution Config(JSON) Test</label>
+                    <div class="controls">
+												<h4><span id="btnNewCommand" class="label label-default">Add Command</span></h4>
+												<div id="commandContainer"></div>
+												<script id="commandTemplate" type="text/x-handlebars-template">
+														<div class="command">
+                                <textarea class="form-control txtCommand" rows="3" cols="200" placeholder="provide a command.." >
+                                </textarea>
+																<span class="btnRemoveCommand label label-default">-</span>
+                                <span class="btnAddCommand label label-default">+</span>
+														</div>														
+												</script>
+										</div>
+								</div>
                 <div class="control-group">
                     <div class="controls">
                         <button type="submit" class="btn">Submit</button>
@@ -120,11 +132,16 @@
         </form>
     </div>
 
-</div> <!-- /container -->
+</div> <!-- /container -->    
+</div>
 
-<script src="js/jquery.js"></script>
-<script src="js/bootstrap.min.js"></script>
+
+<script src="lib/jquery.js"></script>
+<script src="lib/bootstrap/js/bootstrap.min.js"></script>
+<script src="lib/handlebars-v1.3.0.js"></script>
+
 <script src="js/auroraClient.js"></script>
+                
 <!-- Le javascript
 ================================================== -->
 <!-- Placed at the end of the document so the pages load faster -->
