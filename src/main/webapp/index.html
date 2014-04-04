@@ -96,7 +96,7 @@
                         <input type="text" id="disk" placeholder="Disk in MB" value="1024">
                     </div>
                 </div>
-                <div class="control-group">
+                <div class="control-group hide">
                     <label class="control-label" for="execConfig">Execution Config(JSON)</label>
                     <div class="controls">
                         <textarea id="execConfig" rows="3" cols="50">{"priority": 0, "task": {"processes": [{"daemon": false, "name": "hello", "ephemeral": false, "max_failures": 1, "min_duration": 5, "cmdline": "\n    while true; do\n      echo hello world\n      sleep 10\n    done\n  ", "final": false}], "name": "hello", "finalization_wait": 30, "max_failures": 1, "max_concurrency": 0, "resources": {"disk": 134217728, "ram": 134217728, "cpu": 1.0}, "constraints": [{"order": ["hello"]}]}, "name": "hello", "environment": "prod", "max_task_failures": 1, "enable_hooks": false, "cluster": "example", "production": false, "role": "vagrant"}</textarea>

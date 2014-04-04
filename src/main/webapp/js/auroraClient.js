@@ -1,5 +1,5 @@
 
-var API_URL = "http://localhost:8080/incubator-aurora/rest/auroraclient";
+var API_URL = "rest/auroraclient";
 
 var tasks = [];
 
@@ -72,7 +72,7 @@ function getExecConfig() {
 		taskObj.constraints[0].order.push(newProcesses[i].name);
 	}
 	
-	alert(JSON.stringify(flatten(jobObj)));
+	return JSON.stringify(jobObj);
 }
 
 function flatten(obj) {
@@ -93,6 +93,10 @@ var callCreateJob = function () {
     var disk = $("#disk").val();
 //    var execConfig = $("#execConfig").val();
 		var execConfig = getExecConfig();
+		if (!execConfig && execConfig.length == 0) {
+			alert('There is no command to process');
+			return;
+		}
     var create_job_url = API_URL + "/createjob?aSchedulerAddr=" + aSchedulerAddr + "&aSchedulerPort=" + aSchedulerPort + "&" +
         "jobName=" + jobName + "&environment=" + environment + "&cpu=" + cpu + "&ram=" + ram + "&disk=" + disk + "&execConfig=" + execConfig;
 
