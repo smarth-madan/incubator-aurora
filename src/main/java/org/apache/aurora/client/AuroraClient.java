@@ -28,12 +28,12 @@ public class AuroraClient{
     private static AuroraAdmin.Client client;
     private static TTransport transport;
 
-    public static void main(String args[]){
-        AuroraClient ac = new AuroraClient();
-        ac.createClient("192.168.33.6","8082");
-        ac.killJob();
-        ac.closeClient();
-    }
+//    public static void main(String args[]){
+//        AuroraClient ac = new AuroraClient();
+//        ac.createClient("192.168.33.6","8082");
+//        ac.killJob();
+//        ac.closeClient();
+//    }
 
 
     public void createClient(String ip, String port){

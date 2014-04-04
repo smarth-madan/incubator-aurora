@@ -6,7 +6,7 @@ var tasks = [];
 var jobObj = {
 	priority: 0,
 	task: new Object(),
-	name: 'hello',
+	name: 'job1',
 	environment: 'prod',
 	max_task_failures: 1,
 	enable_hooks: false,
@@ -17,7 +17,7 @@ var jobObj = {
 
 var taskObj = {
 		processes: [], //Array of process objects	
-    name: 'hello',
+    name: 'process1',
     finalization_wait: 30,
 		max_failures: 1,
     max_concurrency: 0,
@@ -105,6 +105,8 @@ var callCreateJob = function () {
         method: "POST",
         success: function (data) {
             $("#result").text(data);
+            var link="http://"+aSchedulerAddr+":8081/scheduler/vagrant/"+environment+"/"+jobName;
+            $("#linkToJob").html("<a href="+link+">"+link+"</a>");
         },
         error: function (chr, data, error) {
             attDailyJson = data;
