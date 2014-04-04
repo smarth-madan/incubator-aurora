@@ -36,9 +36,12 @@
             </button>
             <a class="brand" href="#">Aurora Client</a>
             <div class="nav-collapse collapse">
-                <ul class="nav">
+                <ul class="nav  navbar-nav">
                     <li class="active"><a href="#">Home</a></li>
-                    <li><a href="#about">Client API</a></li>
+                    <li><a href="pages/api.html">Client API</a></li>
+                </ul>
+                <ul class=" nav navbar-text pull-right">
+                    <li><img src="img/aurora_logo.png" alt="Smiley face" height="420" width="142"/></li>
                 </ul>
             </div><!--/.nav-collapse -->
         </div>
@@ -49,17 +52,16 @@
 
     <div class="hero-unit">
         <h2>Aurora Client APIs</h2>
-        <p>...</p>
         <form class="form-horizontal" id="createJob">
             <fieldset>
                 <legend>1. Create Job</legend>
-                <div class="control-group">
+                <div class="control-group inline-block  ">
                     <label class="control-label" for="aSchedulerAddr">Aurora Scheduler</label>
-                    <div class="controls">
+                    <div class="controls inline">
                         <input id="aSchedulerAddr" placeholder="IP Address of Aurora Scheduler" value="192.168.33.6">
                     </div>
-                    <label class="control-label" for="aSchedulerPort">Port</label>
-                    <div class="controls">
+                    <label class="control-label inline" for="aSchedulerPort">Port</label>
+                    <div class="controls inline">
                         <input id="aSchedulerPort" placeholder="Port" value="8082">
                     </div>
                 </div>
@@ -87,13 +89,13 @@
                 <div class="control-group">
                     <label class="control-label" for="ram">RAM(MB)</label>
                     <div class="controls">
-                        <input type="text" id="ram" placeholder="Ram in MB" value="1024">
+                        <input type="text" id="ram" placeholder="Ram in MB" value="256">
                     </div>
                 </div>
                 <div class="control-group">
                     <label class="control-label" for="disk">Disk(MB)</label>
                     <div class="controls">
-                        <input type="text" id="disk" placeholder="Disk in MB" value="1024">
+                        <input type="text" id="disk" placeholder="Disk in MB" value="500">
                     </div>
                 </div>
                 <div class="control-group hide">

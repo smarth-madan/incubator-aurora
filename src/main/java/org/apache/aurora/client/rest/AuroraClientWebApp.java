@@ -32,6 +32,7 @@ public class AuroraClientWebApp {
         AuroraClient ac = new AuroraClient();
         ac.createClient(aSchedulerAddr,aSchedulerPort);
         String ret = ac.createJob(jobName,environment,Integer.parseInt(cpu),Integer.parseInt(ram),Integer.parseInt(disk),execConfig);
+        ac.closeClient();
         return ret;
     }
 }

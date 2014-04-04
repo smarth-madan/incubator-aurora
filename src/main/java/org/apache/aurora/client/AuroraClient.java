@@ -18,8 +18,8 @@ import static org.apache.aurora.gen.apiConstants.DEFAULT_ENVIRONMENT;
  * Created by smadan on 3/27/14.
  */
 public class AuroraClient{
-    private static final String ROLE = "vagrant";
-    private static final String USER = "vagrant";
+    private static final String ROLE = "knagireddy";
+    private static final String USER = "knagireddy";
     private static final String JOB_NAME = "hello_world";
     private static final IJobKey JOB_KEY = JobKeys.from(ROLE, DEFAULT_ENVIRONMENT, JOB_NAME);
     private static final SessionKey SESSION = new SessionKey();
@@ -27,6 +27,7 @@ public class AuroraClient{
     private static final ILock LOCK = ILock.build(new Lock().setKey(LOCK_KEY.newBuilder()));
     private static AuroraAdmin.Client client;
     private static TTransport transport;
+    private static TProtocol protocol;
 
 //    public static void main(String args[]){
 //        AuroraClient ac = new AuroraClient();
@@ -42,7 +43,7 @@ public class AuroraClient{
                 transport = new TSocket(ip, Integer.parseInt(port));
                 transport.open();
 
-                TProtocol protocol = new TBinaryProtocol(transport);
+                protocol = new TBinaryProtocol(transport);
                 client = new AuroraAdmin.Client(protocol);
 
             }
@@ -53,6 +54,7 @@ public class AuroraClient{
 
     public void closeClient(){
         transport.close();
+        client=null;
     }
 
     public void killJob(){
@@ -102,7 +104,7 @@ public class AuroraClient{
 
     private TaskConfig defaultTask(boolean production) {
 
-        String task= "{\"priority\": 0, \"task\": {\"processes\": [{\"daemon\": false, \"name\": \"hello\", \"ephemeral\": false, \"max_failures\": 1, \"min_duration\": 5, \"cmdline\": \"\\n    while true; do\\n      echo hello world\\n      sleep 10\\n    done\\n  \", \"final\": false}], \"name\": \"hello\", \"finalization_wait\": 30, \"max_failures\": 1, \"max_concurrency\": 0, \"resources\": {\"disk\": 134217728, \"ram\": 134217728, \"cpu\": 1.0}, \"constraints\": [{\"order\": [\"hello\"]}]}, \"name\": \"hello\", \"environment\": \"prod\", \"max_task_failures\": 1, \"enable_hooks\": false, \"cluster\": \"example\", \"production\": true, \"role\": \"vagrant\"}";
+        String task= "{\"priority\": 0, \"task\": {\"processes\": [{\"daemon\": false, \"name\": \"hello\", \"ephemeral\": false, \"max_failures\": 1, \"min_duration\": 5, \"cmdline\": \"\\n    while true; do\\n      echo hello world\\n      sleep 10\\n    done\\n  \", \"final\": false}], \"name\": \"hello\", \"finalization_wait\": 30, \"max_failures\": 1, \"max_concurrency\": 0, \"resources\": {\"disk\": 134217728, \"ram\": 134217728, \"cpu\": 1.0}, \"constraints\": [{\"order\": [\"hello\"]}]}, \"name\": \"hello\", \"environment\": \"prod\", \"max_task_failures\": 1, \"enable_hooks\": false, \"cluster\": \"example\", \"production\": true, \"role\": \"knagireddy\"}";
         return new TaskConfig()
                 .setOwner(new Identity(ROLE, USER))
                 .setEnvironment("prod")

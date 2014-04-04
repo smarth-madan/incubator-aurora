@@ -12,7 +12,7 @@ var jobObj = {
 	enable_hooks: false,
 	cluster: 'example',
 	production: false,
-	role: 'vagrant'
+	role: 'knagireddy'
 };
 
 var taskObj = {
@@ -68,6 +68,7 @@ function getExecConfig() {
 	});
 
 	taskObj.processes = newProcesses;
+	taskObj.constraints[0].order=[];
 	for (var i = 0; i < newProcesses.length; i++) {
 		taskObj.constraints[0].order.push(newProcesses[i].name);
 	}
@@ -105,8 +106,8 @@ var callCreateJob = function () {
         method: "POST",
         success: function (data) {
             $("#result").text(data);
-            var link="http://"+aSchedulerAddr+":8081/scheduler/vagrant/"+environment+"/"+jobName;
-            $("#linkToJob").html("<a href="+link+">"+link+"</a>");
+            var link="http://"+aSchedulerAddr+":8081/scheduler/knagireddy/"+environment+"/"+jobName;
+            $("#linkToJob").html("<a href="+link+" target=\"_blank\">"+link+"</a>");
         },
         error: function (chr, data, error) {
             attDailyJson = data;
