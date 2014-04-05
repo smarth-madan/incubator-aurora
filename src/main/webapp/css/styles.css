@@ -1,9 +1,107 @@
 body {
   padding-top: 60px; /* 60px to make the container go all the way to the bottom of the topbar */
+  background-image: url('../img/background.jpg');
+  font-family: 'Open Sans',  sans-serif;
+  font-weight: 100;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 100;
+}
+
+.white {
+  color: #ffffff; 
+}
+
+a {
+  color: #ffffff;
+}
+
+legend {
+  color: #ffffff;
+}
+
+.navbar-inverse .brand {
+  color: #ffffff;
+}
+
+.form-horizontal .control-group {
+  margin-top: 0px;
+}
+
+.label-big {
+  padding: 5px 10px 6px;
+}
+
+.label-big, .badge-big {
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.hero-unit {
+  adding: 0 2.5% 2%;
+  background: rgba(0,0,0,.5);
+  background-clip: padding-box;
+  text-shadow: .05em .05em .1em rgba(0,0,0,.4);
+  color: white;
+  border: 30px solid transparent;
+  padding-top: 10px;
+}
+.site {
+    width: 90%;
+    margin: 0 auto;
+    padding: 0 5%;
+}
+
+.site-header {
+    text-align: center;
+}
+
+.site-header:before {
+    content: '';
+    display: inline-block;
+    height: 100%;
+    vertical-align: middle;
+    margin-right: -0.25em;
+}
+
+.site-branding {
+    display: inline-block;
+    vertical-align: middle;
+    width: 50%;
+}
+
+.site-header h1,.site-header h2,.site-header .btn {
+    margin-bottom: 40px;
+}
+
+.site-header h2 {
+    font-size: 1.5em;
+    line-height: 1.5;
 }
 
 .command {
   margin-top: 10px;
+}
+
+.txtCommand {
+  width: 400px;
+}
+
+.formSubmit {
+/*background: #10689a;*/
+  background: rgba(0,0,0,.5);
+  border: none;
+  color: #fff;
+  width: auto;
+  cursor: pointer;
+  text-transform: uppercase;
+  display: inline-block;
+  padding: 15px 30px;
+  font-size: 1.1em;
+  border-radius: 2px;
+  letter-spacing: 1px;
+  margin-top: 20px;
 }
 
 #btnNewCommand, .btnAddCommand, .btnRemoveCommand {

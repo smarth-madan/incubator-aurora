@@ -15,6 +15,8 @@
     <script src="../js/html5shiv.js"></script>
     <![endif]-->
 
+    <link rel="stylesheet" type="text/css" href="http://fonts.googleapis.com/css?family=Tangerine">
+
     <!-- Fav and touch icons -->
     <link rel="apple-touch-icon-precomposed" sizes="144x144" href="../ico/apple-touch-icon-144-precomposed.png">
     <link rel="apple-touch-icon-precomposed" sizes="114x114" href="../ico/apple-touch-icon-114-precomposed.png">
@@ -34,108 +36,35 @@
                 <span class="icon-bar"></span>
                 <span class="icon-bar"></span>
             </button>
-            <a class="brand" href="#">Aurora Client</a>
+            <a class="brand" href="#">Aurora Web Client</a>
             <div class="nav-collapse collapse">
-                <ul class="nav  navbar-nav">
-                    <li class="active"><a href="#">Home</a></li>
-                    <li><a href="pages/api.html">Client API</a></li>
+                <ul class="nav  navbar-nav pull-right">
+                    <li class="active"><a href="#">SCHEDULE JOB</a></li>
+                    <li><a href="pages/api.html">API</a></li>
+                    <li><a href="pages/api.html">GIT HUB</a></li>
                 </ul>
-                <ul class=" nav navbar-text pull-right">
+                <!--<ul class=" nav navbar-text pull-right">
                     <li><img src="img/aurora_logo.png" alt="Smiley face" height="420" width="142"/></li>
-                </ul>
+                </ul>-->
             </div><!--/.nav-collapse -->
         </div>
     </div>
 </div>
 
-<div class="container">
-
-    <div class="hero-unit">
-        <h2>Aurora Client APIs</h2>
-        <form class="form-horizontal" id="createJob">
-            <fieldset>
-                <legend>1. Create Job</legend>
-                <div class="control-group inline-block  ">
-                    <label class="control-label" for="aSchedulerAddr">Aurora Scheduler</label>
-                    <div class="controls inline">
-                        <input id="aSchedulerAddr" placeholder="IP Address of Aurora Scheduler" value="192.168.33.6">
-                    </div>
-                    <label class="control-label inline" for="aSchedulerPort">Port</label>
-                    <div class="controls inline">
-                        <input id="aSchedulerPort" placeholder="Port" value="8082">
-                    </div>
-                </div>
-                <div class="control-group">
-                    <label class="control-label" for="jobName">Job Name</label>
-                    <div class="controls">
-                        <input type="text" id="jobName" placeholder="hello_world">
-                    </div>
-                </div>
-                <div class="control-group">
-                    <label class="control-label" for="environment">Environment</label>
-                    <div class="controls">
-                        <select id="environment">
-                            <option>devel</option>
-                            <option>prod</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="control-group">
-                    <label class="control-label" for="cpu">CPU</label>
-                    <div class="controls">
-                        <input type="text" id="cpu" placeholder="No. of CPU" value="1">
-                    </div>
-                </div>
-                <div class="control-group">
-                    <label class="control-label" for="ram">RAM(MB)</label>
-                    <div class="controls">
-                        <input type="text" id="ram" placeholder="Ram in MB" value="256">
-                    </div>
-                </div>
-                <div class="control-group">
-                    <label class="control-label" for="disk">Disk(MB)</label>
-                    <div class="controls">
-                        <input type="text" id="disk" placeholder="Disk in MB" value="500">
-                    </div>
-                </div>
-                <div class="control-group hide">
-                    <label class="control-label" for="execConfig">Execution Config(JSON)</label>
-                    <div class="controls">
-                        <textarea id="execConfig" rows="3" cols="50">{"priority": 0, "task": {"processes": [{"daemon": false, "name": "hello", "ephemeral": false, "max_failures": 1, "min_duration": 5, "cmdline": "\n    while true; do\n      echo hello world\n      sleep 10\n    done\n  ", "final": false}], "name": "hello", "finalization_wait": 30, "max_failures": 1, "max_concurrency": 0, "resources": {"disk": 134217728, "ram": 134217728, "cpu": 1.0}, "constraints": [{"order": ["hello"]}]}, "name": "hello", "environment": "prod", "max_task_failures": 1, "enable_hooks": false, "cluster": "example", "production": false, "role": "vagrant"}</textarea>
-                    </div>
-                </div>
-								
-								<div class="control-group">
-                    <div class="controls">
-												<h4><span id="btnNewCommand" class="label label-default">Add Command</span></h4>
-												<div id="commandContainer"></div>
-												<script id="commandTemplate" type="text/x-handlebars-template">
-														<div class="command">
-                                <textarea class="form-control txtCommand" rows="3" cols="200" placeholder="provide a command.." >
-                                </textarea>
-																<span class="btnRemoveCommand label label-default">-</span>
-                                <span class="btnAddCommand label label-default">+</span>
-														</div>														
-												</script>
-										</div>
-								</div>
-                <div class="control-group">
-                    <div class="controls">
-                        <button type="submit" class="btn">Submit</button>
-                    </div>
-                </div>
-                <div class="control-group">
-                    <div class="controls">
-                        <p type="text" id="result"></p>
-                        <div id="linkToJob"></div>
-                    </div>
-                </div>
-            </fieldset>
-        </form>
+<div id="page" class="hfeed site">
+    <header id="masthead" class="site-header block" role="banner" style="height: 578px;">
+    <div class="site-branding">
+        <h1 class="site-title white"><span>Aurora Web Client</span></h1>
+        <h2 class="site-description white">
+            <p>Easy and convenient way to schedule jobs in Apache Aurora</p>
+        </h2>
+        <a class="btn btn-big btn-translucent" href="scheduler.html">
+        GET GOING </a>
     </div>
-
-</div> <!-- /container -->    
+    
+    </header>
 </div>
+ 
 
 
 <script src="lib/jquery.js"></script>

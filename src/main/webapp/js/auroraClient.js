@@ -86,7 +86,8 @@ function flatten(obj) {
 
 var callCreateJob = function () {
     var aSchedulerAddr = $("#aSchedulerAddr").val();
-    var aSchedulerPort = $("#aSchedulerPort").val();
+//    var aSchedulerPort = $("#aSchedulerPort").val();
+		var aSchedulerPort = '8082';
     var jobName = $("#jobName").val();
     var environment = $("#environment").val();
     var cpu = $("#cpu").val();
@@ -154,4 +155,8 @@ $(document).ready(function () {
     $('#btnNewCommand').click(function () {
         addCommand(this);
     });
+		
+		// Empty command
+		addCommand(null);
+		$('#jobName').focus();
 });

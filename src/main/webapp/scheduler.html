@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Aurora Client</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Bootstrap -->
+    <link href="lib/bootstrap/css/bootstrap.min.css" rel="stylesheet" media="screen">
+    <link href="lib/bootstrap/css/bootstrap.css" rel="stylesheet">
+    <link href="lib/bootstrap/css/bootstrap-responsive.css" rel="stylesheet">
+
+    <link href="css/styles.css" rel="stylesheet">
+
+    <!-- HTML5 shim, for IE6-8 support of HTML5 elements -->
+    <!--[if lt IE 9]>
+    <script src="../js/html5shiv.js"></script>
+    <![endif]-->
+
+    <link rel="stylesheet" type="text/css" href="http://fonts.googleapis.com/css?family=Tangerine">
+
+    <!-- Fav and touch icons -->
+    <link rel="apple-touch-icon-precomposed" sizes="144x144" href="../ico/apple-touch-icon-144-precomposed.png">
+    <link rel="apple-touch-icon-precomposed" sizes="114x114" href="../ico/apple-touch-icon-114-precomposed.png">
+    <link rel="apple-touch-icon-precomposed" sizes="72x72" href="../ico/apple-touch-icon-72-precomposed.png">
+    <link rel="apple-touch-icon-precomposed" href="../ico/apple-touch-icon-57-precomposed.png">
+    <link rel="shortcut icon" href="../ico/favicon.png">
+</head>
+<body>
+
+<body>
+    
+<div class="navbar navbar-inverse navbar-fixed-top">
+    <div class="navbar-inner">
+        <div class="container">
+            <button type="button" class="btn btn-navbar" data-toggle="collapse" data-target=".nav-collapse">
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a class="brand" href="index.html">Aurora Web Client</a>
+            <div class="nav-collapse collapse">
+                <ul class="nav  navbar-nav pull-right">
+                    <li class="active"><a href="#">SCHEDULE JOB</a></li>
+                    <li><a href="pages/api.html">API</a></li>
+                    <li><a href="pages/api.html">GIT HUB</a></li>
+                </ul>
+                <!--<ul class=" nav navbar-text pull-right">
+                    <li><img src="img/aurora_logo.png" alt="Smiley face" height="420" width="142"/></li>
+                </ul>-->
+            </div><!--/.nav-collapse -->
+        </div>
+    </div>
+</div>
+
+<div class="container">
+
+    <div class="hero-unit">
+        <form class="form-horizontal" id="createJob">
+            <div class="row">
+                <div class="span6">
+                    <fieldset>
+                        <legend>1. JOB INFORMATION</legend>
+                        <div class="control-group">
+                            <label class="control-label" for="jobName">Job Name</label>
+                            <div class="controls">
+                                <input type="text" id="jobName" placeholder="hello_world">
+                            </div>
+                        </div>
+                        <div class="control-group inline-block  ">
+                            <label class="control-label" for="aSchedulerAddr">Aurora Scheduler</label>
+                            <div class="controls inline">
+                                <input id="aSchedulerAddr" placeholder="IP Address of Aurora Scheduler" value="192.168.33.6">
+                            </div>
+                        </div>
+                    </fieldset>
+                </div>
+                <div>
+                    <fieldset>
+                        <legend>2. ENVIRONMENT INFORMATION</legend>
+                        <div class="control-group">
+                            <label class="control-label" for="environment">Environment</label>
+                            <div class="controls">
+                                <select id="environment">
+                                    <option>devel</option>
+                                    <option>prod</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label" for="cpu">CPU</label>
+                            <div class="controls">
+                                <input type="text" id="cpu" placeholder="No. of CPU" value="1">
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label" for="ram">RAM(MB)</label>
+                            <div class="controls">
+                                <input type="text" id="ram" placeholder="Ram in MB" value="256">
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label" for="disk">Disk(MB)</label>
+                            <div class="controls">
+                                <input type="text" id="disk" placeholder="Disk in MB" value="500">
+                            </div>
+                        </div>
+                        <div class="control-group hide">
+                            <label class="control-label" for="execConfig">Execution Config(JSON)</label>
+                            <div class="controls">
+                                <textarea id="execConfig" rows="3" cols="50">{"priority": 0, "task": {"processes": [{"daemon": false, "name": "hello", "ephemeral": false, "max_failures": 1, "min_duration": 5, "cmdline": "\n    while true; do\n      echo hello world\n      sleep 10\n    done\n  ", "final": false}], "name": "hello", "finalization_wait": 30, "max_failures": 1, "max_concurrency": 0, "resources": {"disk": 134217728, "ram": 134217728, "cpu": 1.0}, "constraints": [{"order": ["hello"]}]}, "name": "hello", "environment": "prod", "max_task_failures": 1, "enable_hooks": false, "cluster": "example", "production": false, "role": "vagrant"}</textarea>
+                            </div>
+                        </div>
+                        </fieldset>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="span6">
+                        <fieldset>
+                            <legend>3. COMMANDS</legend>
+                            <div class="control-group">
+                                <div class="controls" style="margin-left: 30px">
+                                    <h4><span id="btnNewCommand" class="label label-big">Add Command</span></h4>
+                                    <div id="commandContainer"></div>
+                                    <script id="commandTemplate" type="text/x-handlebars-template">
+                                        <div class="command">
+                                            <textarea class="form-control txtCommand" rows="3" cols="200" placeholder="provide a command.."/>
+                                            <span class="btnRemoveCommand label label-big">-</span>
+                                            <span class="btnAddCommand label label-big">+</span>
+                                        </div>														
+                                    </script>
+                                </div>
+                            </div>
+                        </fieldset>
+                    </div>
+                </div>
+                <div class="row pull-right">
+                    <div>
+                        <fieldset>
+                            <div class="control-group">
+                                <div class="controls">
+                                    <input class="formSubmit" type="submit" value="Clear">
+                                    <input class="formSubmit" type="submit" value="Schedule Job">
+                                </div>
+                            </div>
+                            <div class="control-group">
+                                <div class="controls">
+                                    <p type="text" id="result"></p>
+                                    <div id="linkToJob"></div>
+                                </div>
+                            </div>
+                        </fieldset>
+                    </div>
+                </div>
+        </form>
+    </div>
+
+</div> <!-- /container -->    
+</div>
+
+
+<script src="lib/jquery.js"></script>
+<script src="lib/bootstrap/js/bootstrap.min.js"></script>
+<script src="lib/handlebars-v1.3.0.js"></script>
+
+<script src="js/auroraClient.js"></script>
+                
+<!-- Le javascript
+================================================== -->
+<!-- Placed at the end of the document so the pages load faster -->
+
+</body>
+</html>
