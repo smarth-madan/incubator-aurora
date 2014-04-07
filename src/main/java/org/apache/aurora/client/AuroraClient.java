@@ -12,6 +12,9 @@ import org.apache.thrift.protocol.TProtocol;
 import org.apache.thrift.transport.TSocket;
 import org.apache.thrift.transport.TTransport;
 
+import java.util.HashSet;
+import java.util.Set;
+
 import static org.apache.aurora.gen.apiConstants.DEFAULT_ENVIRONMENT;
 
 /**
@@ -104,6 +107,16 @@ public class AuroraClient{
 
     private TaskConfig defaultTask(boolean production) {
 
+        Set<Constraint> constraints = new HashSet<Constraint>();
+        Constraint constraint = new Constraint();
+        TaskConstraint taskConstraint = new TaskConstraint();
+        HashSet<String> value = new HashSet<String>();
+        value.add("a") ;
+        taskConstraint.setValue(new ValueConstraint(false,value));
+        constraint.setName("rack");
+        constraint.setConstraint(taskConstraint);
+        constraints.add(constraint);
+
         String task= "{\"priority\": 0, \"task\": {\"processes\": [{\"daemon\": false, \"name\": \"hello\", \"ephemeral\": false, \"max_failures\": 1, \"min_duration\": 5, \"cmdline\": \"\\n    while true; do\\n      echo hello world\\n      sleep 10\\n    done\\n  \", \"final\": false}], \"name\": \"hello\", \"finalization_wait\": 30, \"max_failures\": 1, \"max_concurrency\": 0, \"resources\": {\"disk\": 134217728, \"ram\": 134217728, \"cpu\": 1.0}, \"constraints\": [{\"order\": [\"hello\"]}]}, \"name\": \"hello\", \"environment\": \"prod\", \"max_task_failures\": 1, \"enable_hooks\": false, \"cluster\": \"example\", \"production\": true, \"role\": \"knagireddy\"}";
         return new TaskConfig()
                 .setOwner(new Identity(ROLE, USER))
@@ -114,7 +127,8 @@ public class AuroraClient{
                 .setNumCpus(1)
                 .setRamMb(10)
                 .setDiskMb(10)
-                .setProduction(production);
+                .setProduction(production)
+                .setConstraints(constraints);
     }
 
     public TaskConfig makeTask(String jobName, boolean production,String environment,Integer cpu, Integer ram, Integer disk,String execConfig) {
@@ -125,11 +139,36 @@ public class AuroraClient{
                 .setEnvironment(environment)
                 .setJobName(jobName)
                 .setContactEmail("smadan@paypal.com")
-                .setExecutorConfig(new ExecutorConfig("AuroraExecutor",task))
+                .setExecutorConfig(new ExecutorConfig("AuroraExecutor", task))
                 .setNumCpus(cpu)
                 .setRamMb(ram)
                 .setDiskMb(disk)
-                .setProduction(production);
+                .setProduction(production)
+                .setConstraints(getConstraints(jobName));
+    }
+
+    private  Set<Constraint> getConstraints(String jobName){
+        Set<Constraint> constraints = new HashSet<Constraint>();
+        Constraint constraint = new Constraint();
+        TaskConstraint taskConstraint = new TaskConstraint();
+        HashSet<String> value = new HashSet<String>();
+        constraint.setName("rack");
+
+        if(jobName.contains("mpp")) {
+            value.add("mpp");
+        }else if(jobName.contains("occ")){
+            value.add("occ");
+        }else{
+            return null;
+        }
+
+        taskConstraint.setValue(new ValueConstraint(false,value));
+        constraint.setConstraint(taskConstraint);
+        constraints.add(constraint);
+
+        return constraints;
+
+
     }
 }
 
