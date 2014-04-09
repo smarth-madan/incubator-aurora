@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Aurora Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="../lib/bootstrap/css/bootstrap.css">
+    <link rel="stylesheet" href="../css/aurora.css">
+</head>
+
+<body>
+
+<!-- Header -->
+<div class="container">
+    <div class="row">
+        <div class="col-xs-12">
+            <h1>
+                <span class="system-folder">Aurora Client</span>
+            </h1>
+        </div>
+    </div>
+</div>
+
+<!-- Bread Crumbs -->
+<div class="container">
+    <h4>
+        <ol class="breadcrumb">
+            <li class="active">Home</li>
+            <li><a href="#">Jobs</a></li>
+        </ol>
+    </h4>
+</div>
+
+
+<div class="container">
+    <div class="row">
+        <div class="col-xs-12">
+
+            <table class="table table-hover table-selectable" id="jobTbl">
+                <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Job Name</th>
+                    <th>Job URL</th>
+                    <th>Created on</th>
+                </tr>
+                </thead>
+                <tbody id="jobtblbody">
+                </tbody>
+            </table>
+
+        </div>
+    </div>
+</div>
+
+
+
+
+
+
+
+<!-- New Job Modal -->
+<div class="container">
+
+    <div id="example" class="modal fade bs-example-modal-lg" style="display: none;" ref="modal"
+         role="dialog" aria-hidden="true" tabIndex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+
+                <form class="form-horizontal" role="form" id="createJob">
+                    <div class="modal-header">
+                        <a class="close" data-dismiss="modal">×</a>
+                        <h3 class="modal-title">NEW JOB</h3>
+                    </div>
+
+                    <div class="modal-body">
+                        <div class="hero-unit">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <fieldset>
+                                        <legend>1. Job Information</legend>
+                                        <div class="form-group">
+                                            <label class="control-label col-md-3" for="jobName">Job Name</label>
+                                            <div class="col-md-9 controls">
+                                                <input type="text" id="jobName" placeholder="hello_world">
+                                            </div>
+                                        </div>
+                                        <div class="form-group inline-block  ">
+                                            <label class="control-label col-md-3" for="aSchedulerAddr">Aurora Scheduler</label>
+                                            <div class="col-md-9 controls inline">
+                                                <input id="aSchedulerAddr" placeholder="IP Address of Aurora Scheduler" value="192.168.33.6">
+                                            </div>
+                                        </div>
+                                        <div class="form-group inline-block  ">
+                                            <label class="control-label col-md-2" for="constraints">Constraints(optional):</label>
+                                            <div id="constraints"></div>
+                                        </div>
+                                        <div class="form-group inline-block  ">
+                                                <label class="control-label col-md-1" for="cname">name:</label>
+                                                <div class="col-md-3 controls inline">
+                                                    <input id="cname" placeholder="" value="">
+                                                </div>
+                                                <label class="control-label col-md-3" for="cvalue">value:</label>
+                                                <div class="col-md-3 controls inline">
+                                                    <input id="cvalue" placeholder="" value="">
+                                                </div>
+                                        </div>
+                                    </fieldset>
+                                </div>
+                                <div>
+                                    <fieldset>
+                                        <legend>2. Environment Information</legend>
+                                        <div class="form-group">
+                                            <label class="control-label col-md-3" for="environment">Environment</label>
+                                            <div class="col-md-9 controls">
+                                                <select id="environment">
+                                                    <option>devel</option>
+                                                    <option>prod</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="control-label col-md-3" for="cpu">CPU</label>
+                                            <div class="col-md-9 controls">
+                                                <input type="text" id="cpu" placeholder="No. of CPU" value="1">
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="control-label col-md-3" for="ram">RAM(MB)</label>
+                                            <div class="col-md-9 controls">
+                                                <input type="text" id="ram" placeholder="Ram in MB" value="256">
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="control-label col-md-3" for="disk">Disk(MB)</label>
+                                            <div class="col-md-9 controls">
+                                                <input type="text" id="disk" placeholder="Disk in MB" value="500">
+                                            </div>
+                                        </div>
+                                        <div class="form-group hide">
+                                            <label class="control-label col-md-3" for="execConfig">Execution Config(JSON)</label>
+                                            <div class="col-md-9 controls">
+                                                <textarea id="execConfig" rows="3" cols="50">{"priority": 0, "task": {"processes": [{"daemon": false, "name": "hello", "ephemeral": false, "max_failures": 1, "min_duration": 5, "cmdline": "\n    while true; do\n      echo hello world\n      sleep 10\n    done\n  ", "final": false}], "name": "hello", "finalization_wait": 30, "max_failures": 1, "max_concurrency": 0, "resources": {"disk": 134217728, "ram": 134217728, "cpu": 1.0}, "constraints": [{"order": ["hello"]}]}, "name": "hello", "environment": "prod", "max_task_failures": 1, "enable_hooks": false, "cluster": "example", "production": false, "role": "vagrant"}</textarea>
+                                            </div>
+                                        </div>
+                                    </fieldset>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="span6">
+                                    <fieldset>
+                                        <legend>3. Commands</legend>
+                                        <div class="form-group">
+                                            <div class="col-md-9 controls" style="margin-left: 30px">
+                                                <h4><span id="btnNewCommand" class="label label-big">Add Command</span></h4>
+                                                <div id="commandContainer"></div>
+                                                <script id="commandTemplate" type="text/x-handlebars-template">
+                                                    <div class="command">
+                                                        <textarea class="form-control txtCommand" rows="3" cols="200" placeholder="provide a command.."/>
+                                                        <span class="btnRemoveCommand label label-big">-</span>
+                                                        <span class="btnAddCommand label label-big">+</span>
+                                                    </div>
+                                                </script>
+                                            </div>
+                                        </div>
+                                    </fieldset>
+                                </div>
+                            </div>
+                            <div class="row pull-right">
+                                <div>
+                                    <fieldset>
+                                        <div class="form-group">
+                                            <div class="col-md-9 controls">
+                                                <p type="text" id="result"></p>
+                                                <div id="linkToJob"></div>
+                                            </div>
+                                        </div>
+                                    </fieldset>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+
+                    <div class="modal-footer">
+                        <button class="btn btn-link" type="button" data-dismiss="modal">
+                            Cancel
+                        </button>
+                        <!--<input class="formSubmit" type="submit" value="Clear">-->
+                        <input type="submit" class="btn btn-primary" value="Create" />
+                    </div>
+
+                    <!--
+                    <div class="modal-footer">
+                      <button class="btn btn-sm btn-danger" data-dismiss="modal">
+                        Destroy
+                      </button>
+                      <button class="btn btn-sm btn-default"
+                          onClick={this.suspendApp} disabled={this.props.model.get("instances") < 1}>
+                        Suspend
+                      </button>
+                      <button class="btn btn-sm btn-default" onClick={this.scaleApp}>
+                        Scale
+                      </button>
+                    </div>-->
+                 </form>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container text-right">
+    <div id="newJob">
+        <button type="button" class="btn btn-primary header-btn" data-toggle="modal" href="#example">
+            + Schedule new Job
+        </button>
+    </div>
+</div>
+
+
+
+
+
+
+<script src="../lib/jquery.js"></script>
+<script src="../lib/handlebars-v1.3.0.js"></script>
+<script src="../lib/bootstrap/js/bootstrap.js"></script>
+<script src="../js/auroraClient.js"></script>
+
+</body>
+</html>

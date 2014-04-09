@@ -1,7 +1,12 @@
 
-var API_URL = "rest/auroraclient";
+var API_URL = "../rest/auroraclient";
 
 var tasks = [];
+// IndexedDB
+var indexedDB = window.indexedDB || window.webkitIndexedDB || window.mozIndexedDB || window.OIndexedDB || window.msIndexedDB,
+    IDBTransaction = window.IDBTransaction || window.webkitIDBTransaction || window.OIDBTransaction || window.msIDBTransaction,
+    db,
+    dbVersion = 1.0;
 
 var jobObj = {
 	priority: 0,
@@ -47,7 +52,8 @@ var processObj = {
 $("#createJob").submit(function (event) {
     event.preventDefault();
     daily = false;
-    callCreateJob();
+    //callCreateJob();
+    callCreateJob2();
     return false;
 });
 
@@ -93,7 +99,7 @@ var callCreateJob = function () {
     var cpu = $("#cpu").val();
     var ram = $("#ram").val();
     var disk = $("#disk").val();
-//    var execConfig = $("#execConfig").val();
+    //    var execConfig = $("#execConfig").val();
 		var execConfig = getExecConfig();
 		if (!execConfig && execConfig.length == 0) {
 			alert('There is no command to process');
@@ -109,6 +115,89 @@ var callCreateJob = function () {
             $("#result").text(data);
             var link="http://"+aSchedulerAddr+":8081/scheduler/knagireddy/"+environment+"/"+jobName;
             $("#linkToJob").html("<a href="+link+" target=\"_blank\">"+link+"</a>");
+            addJobs('knagireddy',jobName, link);
+            $("#example").modal("toggle");
+            var jobTbl = $("#jobtblbody")[0];
+            var row = jobTbl.insertRow(-1);
+            var cell1 = row.insertCell(0);
+            var cell2 = row.insertCell(1);
+            var cell3 = row.insertCell(2);
+            var cell4 = row.insertCell(3);
+            cell2.innerHTML = jobName;
+            cell3.innerHTML = "<a href="+link+" target=\"_blank\">"+link+"</a>";
+            cell4.innerHTML = new Date();
+
+        },
+        error: function (chr, data, error) {
+            attDailyJson = data;
+        },
+        complete: function (xhr, textStatus) {
+            attDailyJson = textStatus;
+        }
+    }).done(function (data, textStatus, xhr) {
+        if (console && console.log) {
+            console.log("Sample of data:", data);
+        }
+    });
+}
+
+var callCreateJob2 = function () {
+    var aSchedulerAddr = $("#aSchedulerAddr").val();
+//    var aSchedulerPort = $("#aSchedulerPort").val();
+    var aSchedulerPort = '8082';
+    var jobName = $("#jobName").val();
+    var environment = $("#environment").val();
+    var cpu = $("#cpu").val();
+    var ram = $("#ram").val();
+    var disk = $("#disk").val();
+    var cname = $("#cname").val();
+    var cvalue = $("#cvalue").val();
+    //    var execConfig = $("#execConfig").val();
+		var execConfig = getExecConfig();
+		if (!execConfig && execConfig.length == 0) {
+			alert('There is no command to process');
+			return;
+		}
+    var create_job_url = API_URL + "/createjob2";
+
+    var sendData = {
+        aSchedulerAddr: aSchedulerAddr,
+        aSchedulerPort: aSchedulerPort,
+        jobName: jobName,
+        environment: environment,
+        cpu: cpu,
+        ram: ram,
+        disk: disk,
+        execConfig: execConfig,
+        constraintName: cname,
+        constraintValue: cvalue
+    }
+    $.ajax({
+        url: create_job_url,
+        method: "POST",
+        dataType: "json",
+        headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            },
+        data:JSON.stringify(sendData),
+        contentType:"application/json",
+        success: function (data) {
+            $("#result").text(data);
+            var link="http://"+aSchedulerAddr+":8081/scheduler/knagireddy/"+environment+"/"+jobName;
+            $("#linkToJob").html("<a href="+link+" target=\"_blank\">"+link+"</a>");
+            addJobs('knagireddy',jobName, link);
+            $("#example").modal("toggle");
+            var jobTbl = $("#jobtblbody")[0];
+            var row = jobTbl.insertRow(-1);
+            var cell1 = row.insertCell(0);
+            var cell2 = row.insertCell(1);
+            var cell3 = row.insertCell(2);
+            var cell4 = row.insertCell(3);
+            cell2.innerHTML = jobName;
+            cell3.innerHTML = "<a href="+link+" target=\"_blank\">"+link+"</a>";
+            cell4.innerHTML = new Date();
+
         },
         error: function (chr, data, error) {
             attDailyJson = data;
@@ -160,3 +249,122 @@ $(document).ready(function () {
 		addCommand(null);
 		$('#jobName').focus();
 });
+
+$(function () {
+  var source = "<div>{{color}}</div>";
+  var template = Handlebars.compile(source);
+  var context = {
+    color: "blue"
+  };
+});
+
+document.addEventListener("DOMContentLoaded", function(){
+
+    if("indexedDB" in window) {
+        idbSupported = true;
+    }
+
+    if(idbSupported) {
+         var openRequest = indexedDB.open("jobTableDB",1);
+
+         openRequest.onupgradeneeded = function(e) {
+            console.log("running onupgradeneeded");
+            var thisDB = e.target.result;
+
+            if(!thisDB.objectStoreNames.contains("jobData")) {
+                thisDB.createObjectStore("jobData",{ autoIncrement:true });
+            }
+
+         }
+
+        openRequest.onsuccess = function(e) {
+            console.log("Success!");
+            db = e.target.result;
+            refreshData();
+        }
+
+        openRequest.onerror = function(e) {
+            console.log("Error");
+            console.dir(e);
+        }
+    }
+
+},false);
+
+function loadJobs(key){
+    var transaction = db.transaction(["jobData"], "readonly");
+    var objectStore = transaction.objectStore("jobData");
+    var ob = objectStore.get(key);
+
+    ob.onsuccess = function(e) {
+        var result = e.target.result;
+        console.dir(result);
+        if(result) {
+            var jobTbl = $("#jobtblbody")[0];
+            var row = jobTbl.insertRow(-1);
+            var cell1 = row.insertCell(0);
+            var cell2 = row.insertCell(1);
+            var cell3 = row.insertCell(2);
+            cell1.innerHTML = key;
+            cell2.innerHTML = result.jobname;
+            cell3.innerHTML = "<a href="+result.joburl+" target=\"_blank\">"+result.joburl+"</a>";
+        } else {
+        }
+    }
+}
+
+function refreshData(){
+  var transaction = db.transaction(["jobData"], "readonly");
+  var objectStore = transaction.objectStore("jobData");
+
+ var cursor = objectStore.openCursor();
+
+ cursor.onsuccess = function(e) {
+     var res = e.target.result;
+     if(res) {
+         console.log("Key", res.key);
+         console.dir("Data", res.value);
+         var jobTbl = $("#jobtblbody")[0];
+         var row = jobTbl.insertRow(-1);
+         var cell1 = row.insertCell(0);
+         var cell2 = row.insertCell(1);
+         var cell3 = row.insertCell(2);
+         var cell4 = row.insertCell(3);
+         cell1.innerHTML = res.key;
+         cell2.innerHTML = res.value.jobname;
+         cell3.innerHTML = "<a href="+res.value.joburl+" target=\"_blank\">"+res.value  .joburl+"</a>";
+         cell4.innerHTML = res.value.created;
+         res.continue();
+     }
+ }
+
+}
+
+function addJobs(username, jobName, jobUrl) {
+
+
+    console.log("About to add "+jobName+":"+jobUrl);
+
+    var transaction = db.transaction(["jobData"],"readwrite");
+    var store = transaction.objectStore("jobData");
+
+    //Define a person
+    var job = {
+        username:username,
+        jobname:jobName,
+        joburl:jobUrl,
+        created:new Date()
+    }
+
+    //Perform the add
+    var request = store.add(job);
+
+    request.onerror = function(e) {
+        console.log("Error",e.target.error.name);
+        //some type of error handler
+    }
+
+    request.onsuccess = function(e,job) {
+        console.log("Woot! Did it");
+    }
+}

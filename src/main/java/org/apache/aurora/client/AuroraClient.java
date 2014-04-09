@@ -1,5 +1,6 @@
 package org.apache.aurora.client;
 
+import org.apache.aurora.client.entity.JobConfig;
 import org.apache.aurora.gen.*;
 import org.apache.aurora.scheduler.base.JobKeys;
 import org.apache.aurora.scheduler.storage.entities.IJobConfiguration;
@@ -73,8 +74,17 @@ public class AuroraClient{
 
     public String createJob(String jobName, String environment,Integer cpu, Integer ram, Integer disk,String execConfig ){
         IJobKey jobKey= JobKeys.from(ROLE, environment, jobName);
-        TaskConfig task =  makeTask(jobName,true,environment,cpu,ram,disk,execConfig);
+        TaskConfig task =  makeTask(jobName, true, environment, cpu, ram, disk, execConfig,null);
+        JobConfiguration jobConfiguration = makeJob(task, jobKey);
+        String result = sendCreateJob(jobConfiguration);
+        return result;
+    }
+
+    public String createJob(JobConfig jobConfig){
+        IJobKey jobKey= JobKeys.from(ROLE, jobConfig.getEnvironment(), jobConfig.getJobName());
+        TaskConfig task =  makeTask(jobConfig.getJobName(),true,jobConfig.getEnvironment(),Integer.parseInt(jobConfig.getCpu()),Integer.parseInt(jobConfig.getRam()),Integer.parseInt(jobConfig.getDisk()),jobConfig.getExecConfig(), getConstraints(jobConfig));
         JobConfiguration jobConfiguration = makeJob(task,jobKey);
+        System.out.println(jobConfiguration.toString());
         String result = sendCreateJob(jobConfiguration);
         return result;
     }
@@ -131,7 +141,7 @@ public class AuroraClient{
                 .setConstraints(constraints);
     }
 
-    public TaskConfig makeTask(String jobName, boolean production,String environment,Integer cpu, Integer ram, Integer disk,String execConfig) {
+    public TaskConfig makeTask(String jobName, boolean production,String environment,Integer cpu, Integer ram, Integer disk,String execConfig,Set<Constraint> constraints ) {
 
         String task= execConfig;
         return new TaskConfig()
@@ -144,7 +154,25 @@ public class AuroraClient{
                 .setRamMb(ram)
                 .setDiskMb(disk)
                 .setProduction(production)
-                .setConstraints(getConstraints(jobName));
+                .setConstraints(constraints);
+    }
+
+    private  Set<Constraint> getConstraints(JobConfig jobConfig){
+        Set<Constraint> constraints = new HashSet<Constraint>();
+        Constraint constraint = new Constraint();
+        TaskConstraint taskConstraint = new TaskConstraint();
+        HashSet<String> value = new HashSet<String>();
+        if(!jobConfig.getConstraintName().isEmpty()) {
+            constraint.setName(jobConfig.getConstraintName());
+            value.add(jobConfig.getConstraintValue());
+        }else{
+            return null;
+        }
+
+        taskConstraint.setValue(new ValueConstraint(false,value));
+        constraint.setConstraint(taskConstraint);
+        constraints.add(constraint);
+        return constraints;
     }
 
     private  Set<Constraint> getConstraints(String jobName){
@@ -165,10 +193,7 @@ public class AuroraClient{
         taskConstraint.setValue(new ValueConstraint(false,value));
         constraint.setConstraint(taskConstraint);
         constraints.add(constraint);
-
         return constraints;
-
-
     }
 }
 

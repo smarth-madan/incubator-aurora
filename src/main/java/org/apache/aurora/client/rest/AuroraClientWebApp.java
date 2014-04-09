@@ -1,11 +1,15 @@
 package org.apache.aurora.client.rest;
 
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.Path;
-import javax.ws.rs.QueryParam;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import javax.ws.rs.*;
+import javax.ws.rs.core.Context;
+import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
 
 import org.apache.aurora.client.AuroraClient;
+import org.apache.aurora.client.entity.JobConfig;
+import org.apache.aurora.client.entity.ReturnStatus;
 
 /**
  * Created by smadan on 4/2/14.
@@ -34,5 +38,22 @@ public class AuroraClientWebApp {
         String ret = ac.createJob(jobName,environment,Integer.parseInt(cpu),Integer.parseInt(ram),Integer.parseInt(disk),execConfig);
         ac.closeClient();
         return ret;
+    }
+
+    @POST()
+    @Path("/createjob2")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.APPLICATION_JSON)
+    public Response createJob(JobConfig jobConfig,
+                              @Context HttpServletRequest request,
+                              @Context HttpServletResponse response) {
+        AuroraClient ac = new AuroraClient();
+        ac.createClient(jobConfig.getaSchedulerAddr(),jobConfig.getaSchedulerPort());
+        String ret = ac.createJob(jobConfig);
+        ReturnStatus returnStatus = new ReturnStatus(0,ret);
+        ac.closeClient();
+        return Response.status(Response.Status.CREATED)
+                .entity(returnStatus).type(MediaType.APPLICATION_JSON)
+                .build();
     }
 }

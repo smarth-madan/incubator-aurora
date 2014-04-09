@@ -137,7 +137,7 @@ jar {
 }
 
 dependencies {
-  def jerseyRev = '1.12'
+  def jerseyRev = '1.17.1'
   def libthriftRev = '0.9.1'
   def log4jRev = '1.2.17'
   def slf4jRev = '1.6.1'
@@ -155,6 +155,7 @@ dependencies {
   compile "com.sun.jersey:jersey-json:${jerseyRev}"
   compile "com.sun.jersey:jersey-server:${jerseyRev}"
   compile "com.sun.jersey:jersey-servlet:${jerseyRev}"
+  compile "com.sun.jersey.contribs:jersey-spring:${jerseyRev}"
   compile "com.sun.jersey.contribs:jersey-guice:${jerseyRev}"
   compile 'commons-lang:commons-lang:2.5'
   compile 'javax.inject:javax.inject:1'
