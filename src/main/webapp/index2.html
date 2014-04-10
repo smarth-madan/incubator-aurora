@@ -1,92 +1,81 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="utf-8">
-    <title>Aurora Test</title>
+    <title>Aurora Client</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="lib/bootstrap/css/bootstrap.css">
-    <link rel="stylesheet" href="css/aurora.css">
-</head>
+    <!-- Bootstrap -->
+    <link href="lib/bootstrap/css/bootstrap.min.css" rel="stylesheet" media="screen">
+    <link href="lib/bootstrap/css/bootstrap.css" rel="stylesheet">
+    <link href="lib/bootstrap/css/bootstrap-responsive.css" rel="stylesheet">
 
+    <link href="css/styles.css" rel="stylesheet">
+
+    <!-- HTML5 shim, for IE6-8 support of HTML5 elements -->
+    <!--[if lt IE 9]>
+    <script src="../js/html5shiv.js"></script>
+    <![endif]-->
+
+    <link rel="stylesheet" type="text/css" href="http://fonts.googleapis.com/css?family=Tangerine">
+
+    <!-- Fav and touch icons -->
+    <link rel="apple-touch-icon-precomposed" sizes="144x144" href="../ico/apple-touch-icon-144-precomposed.png">
+    <link rel="apple-touch-icon-precomposed" sizes="114x114" href="../ico/apple-touch-icon-114-precomposed.png">
+    <link rel="apple-touch-icon-precomposed" sizes="72x72" href="../ico/apple-touch-icon-72-precomposed.png">
+    <link rel="apple-touch-icon-precomposed" href="../ico/apple-touch-icon-57-precomposed.png">
+    <link rel="shortcut icon" href="../ico/favicon.png">
+</head>
 <body>
 
-<!-- Header -->
-<div class="container">
-    <div class="row">
-        <div class="col-xs-12">
-            <h1>
-                <span class="system-folder">Aurora Client</span>
-            </h1>
+<body>
+    
+<div class="navbar navbar-inverse navbar-fixed-top">
+    <div class="navbar-inner">
+        <div class="container">
+            <button type="button" class="btn btn-navbar" data-toggle="collapse" data-target=".nav-collapse">
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a class="brand" href="#">Aurora Web Client</a>
+            <div class="navbar-collapse collapse">
+                <ul class="nav navbar-nav navbar-right">
+                    <li class="active"><a href="#">SCHEDULE JOB</a></li>
+                    <li><a href="pages/api.html">API</a></li>
+                    <li><a href="pages/api.html">GIT HUB</a></li>
+                </ul>
+                <!--<ul class=" nav navbar-text pull-right">
+                    <li><img src="img/aurora_logo.png" alt="Smiley face" height="420" width="142"/></li>
+                </ul>-->
+            </div><!--/.nav-collapse -->
         </div>
     </div>
 </div>
 
-<!-- New Job Modal -->
-<div class="container">
-
-    <div id="Login" class="modal fade" style="display: none;" ref="modal"
-         role="dialog" aria-hidden="true" tabIndex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-
-                <form method="post" class="form-horizontal" role="form" onSubmit={this.onSubmit}>
-                    <div class="modal-header">
-                        <a class="close" data-dismiss="modal">×</a>
-                        <h3 class="modal-title">+ Login</h3>
-                    </div>
-
-                    <div class="modal-body">
-                        <form class="form-horizontal">
-
-                            <div class="form-group">
-                                <label class="col-md-3 control-label">
-                                    User Name
-                                </label>
-                                <div class="col-md-9">
-                                    <input type="text" id="inputSuccess" class="form-control">
-                                    <span class="help-block">Enter User Name</span>
-                                </div>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="col-md-3 control-label">
-                                    Password
-                                </label>
-                                <div class="col-md-9">
-                                    <input type="password" id="inputSuccess" class="form-control">
-                                    <span class="help-block">Enter Passwd</span>
-                                </div>
-                            </div>
-
-                        </form>
-                    </div>
-            </div>
-
-
-            <div class="modal-footer">
-                <button class="btn btn-danger" data-dismiss="modal">
-                    Cancel
-                </button>
-                <a data-toggle="modal" href="pages/home.html" class="btn btn-default btn-primary">+ Login</a>
-            </div>
-        </div>
+<div id="page" class="hfeed site">
+    <header id="masthead" class="site-header block" role="banner" style="height: 578px;">
+    <div class="site-branding">
+        <h1 class="site-title white"><span>Aurora Web Client</span></h1>
+        <h2 class="site-description white">
+            <p>Easy and convenient way to schedule jobs in Apache Aurora</p>
+        </h2>
+        <a class="btn btn-big btn-translucent" href="scheduler.html">
+        GET GOING </a>
     </div>
+    
+    </header>
 </div>
-</div>
-
-<div class="container text-center">
-    <div id="loginButton">
-        <button type="button" class="btn btn-primary header-btn" data-toggle="modal" href="#Login">
-            <h1>+ Login</h1>
-        </button>
-    </div>
-</div>
+ 
 
 
 <script src="lib/jquery.js"></script>
+<script src="lib/bootstrap/js/bootstrap.min.js"></script>
 <script src="lib/handlebars-v1.3.0.js"></script>
-<script src="lib/bootstrap/js/bootstrap.js"></script>
+
 <script src="js/auroraClient.js"></script>
+                
+<!-- Le javascript
+================================================== -->
+<!-- Placed at the end of the document so the pages load faster -->
 
 </body>
 </html>
