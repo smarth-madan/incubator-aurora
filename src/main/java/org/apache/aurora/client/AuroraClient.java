@@ -92,7 +92,7 @@ public class AuroraClient{
     public String sendCreateJob(JobConfiguration jobConfiguration){
         try {
             IJobConfiguration job = IJobConfiguration.build(jobConfiguration);
-            Response res = client.setQuota(ROLE,new ResourceAggregate().setNumCpus(3).setDiskMb(1500).setRamMb(1500), SESSION);
+            Response res = client.setQuota(ROLE,new ResourceAggregate().setNumCpus(200).setDiskMb(300000).setRamMb(600000), SESSION);
             System.out.println(res.getMessage());
 
             res = client.createJob(job.newBuilder(),null, SESSION);
