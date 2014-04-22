@@ -177,7 +177,7 @@ var callCreateJob = function (formId) {
         contentType:"application/json",
         success: function (data) {
             $("#result").text(data);
-            var link="http://"+aSchedulerAddr+":8081/scheduler/"+sendData.role+"/"+sendData.environment+"/"+sendData.jobName;
+            var link="http://"+sendData.aSchedulerAddr+":8081/scheduler/"+sendData.role+"/"+sendData.environment+"/"+sendData.jobName;
             $("#linkToJob").html("<a href="+link+" target=\"_blank\">"+link+"</a>");
             addJobs(sendData.role,sendData.jobName, link);
             $("#example").modal("toggle");
@@ -190,7 +190,7 @@ var callCreateJob = function (formId) {
             cell2.innerHTML = jobName;
             cell3.innerHTML = "<a href="+link+" target=\"_blank\">"+link+"</a>";
             cell4.innerHTML = new Date();
-
+            return;
         },
         error: function (chr, data, error) {
             attDailyJson = data;
@@ -435,6 +435,7 @@ function getProcesses() {
     //    };
 
     var pTemplate =$.parseHTML($("#pOrderTemplate").html())[1];
+    $("#pgOrder > div").remove();
 	$('#processContainer').children('').each(function () {
 	    var newPTemplate = pTemplate.cloneNode();
 		var newProcess = Object.create(processObj);
@@ -451,13 +452,14 @@ function getProcesses() {
 		// Need to do this 'cos of JS inheritence
 		var newProcessStr = JSON.stringify(flatten(newProcess));
 		var newProcessObj = eval("("+ newProcessStr  + ")");
-		processes.push(newProcessObj);
+		newProcesses.push(newProcessObj);
 	});
     $('.gridly').gridly({
         base: 60, // px
         gutter: 20, // px
         columns: 5
       });
+    processes =  newProcesses;
 	return JSON.stringify(processes);
 }
 
@@ -497,6 +499,8 @@ function getTask() {
         $(elements).each(function (){
             taskObj.constraints[0].order.push($(this).html());
         });
+    }else{
+        delete taskObj.constraints;
     }
     taskObj.processes=processes;
     taskObj.name=$("#tName").val();

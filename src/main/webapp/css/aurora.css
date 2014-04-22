@@ -337,3 +337,11 @@ legend{
 	margin-top: -13px;
 }
 
+#processTemplateDiv{
+    border-bottom: 1px dashed #FFA500;
+}
+
+.border{
+ margin-top:10;
+ margin-bottom:10;
+}

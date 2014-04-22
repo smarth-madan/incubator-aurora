@@ -44,6 +44,7 @@ public class AuroraClient{
     public void createClient(String ip, String port){
         try {
             if (client == null) {
+                System.out.println("Opening Connection to IP="+ip+":"+port);
                 transport = new TSocket(ip, Integer.parseInt(port));
                 transport.open();
 
@@ -72,27 +73,27 @@ public class AuroraClient{
 
     }
 
-    public String createJob(String jobName, String environment,Integer cpu, Integer ram, Integer disk,String execConfig ){
-        IJobKey jobKey= JobKeys.from(ROLE, environment, jobName);
-        TaskConfig task =  makeTask(jobName, true, environment, cpu, ram, disk, execConfig,null);
-        JobConfiguration jobConfiguration = makeJob(task, jobKey);
-        String result = sendCreateJob(jobConfiguration);
-        return result;
-    }
+//    public String createJob(String jobName, String environment,Integer cpu, Integer ram, Integer disk,String execConfig ){
+//        IJobKey jobKey= JobKeys.from(ROLE, environment, jobName);
+//        TaskConfig task =  makeTask(jobName, true, environment, cpu, ram, disk, execConfig,null);
+//        JobConfiguration jobConfiguration = makeJob(task, jobKey);
+//        String result = sendCreateJob(jobConfiguration, ROLE);
+//        return result;
+//    }
 
     public String createJob(JobConfig jobConfig){
-        IJobKey jobKey= JobKeys.from(ROLE, jobConfig.getEnvironment(), jobConfig.getJobName());
-        TaskConfig task =  makeTask(jobConfig.getJobName(),true,jobConfig.getEnvironment(),Integer.parseInt(jobConfig.getCpu()),Integer.parseInt(jobConfig.getRam()),Integer.parseInt(jobConfig.getDisk()),jobConfig.getExecConfig(), getConstraints(jobConfig));
-        JobConfiguration jobConfiguration = makeJob(task,jobKey);
+        IJobKey jobKey= JobKeys.from(jobConfig.getRole(), jobConfig.getEnvironment(), jobConfig.getJobName());
+        TaskConfig task =  makeTask(jobConfig);
+        JobConfiguration jobConfiguration = makeJob(task,jobKey,jobConfig);
         System.out.println(jobConfiguration.toString());
-        String result = sendCreateJob(jobConfiguration);
+        String result = sendCreateJob(jobConfiguration, jobConfig.getRole());
         return result;
     }
 
-    public String sendCreateJob(JobConfiguration jobConfiguration){
+    public String sendCreateJob(JobConfiguration jobConfiguration, String role){
         try {
             IJobConfiguration job = IJobConfiguration.build(jobConfiguration);
-            Response res = client.setQuota(ROLE,new ResourceAggregate().setNumCpus(400).setDiskMb(700000).setRamMb(1200000), SESSION);
+            Response res = client.setQuota(role,new ResourceAggregate().setNumCpus(400).setDiskMb(700000).setRamMb(1200000), SESSION);
             System.out.println(res.getMessage());
 
             res = client.createJob(job.newBuilder(),null, SESSION);
@@ -103,17 +104,17 @@ public class AuroraClient{
         }
     }
 
-    public JobConfiguration makeJob(TaskConfig taskConfig,IJobKey jobKey ){
+    public JobConfiguration makeJob(TaskConfig taskConfig,IJobKey jobKey, JobConfig jobConfig ){
         return new JobConfiguration()
-                .setOwner(new Identity(ROLE, USER))
+                .setOwner(new Identity(jobConfig.getRole(), jobConfig.getRole()))
                 .setInstanceCount(1)
                 .setTaskConfig(taskConfig)
                 .setKey(jobKey.newBuilder());
     }
 
-    public JobConfiguration makeJob(){
-        return makeJob(defaultTask(true), JOB_KEY);
-    }
+    //public JobConfiguration makeJob(){
+    //    return makeJob(defaultTask(true), JOB_KEY);
+    //}
 
     private TaskConfig defaultTask(boolean production) {
 
@@ -141,20 +142,19 @@ public class AuroraClient{
                 .setConstraints(constraints);
     }
 
-    public TaskConfig makeTask(String jobName, boolean production,String environment,Integer cpu, Integer ram, Integer disk,String execConfig,Set<Constraint> constraints ) {
-
-        String task= execConfig;
+    public TaskConfig makeTask(JobConfig jobConfig){
+        String task= jobConfig.getExecConfig();
         return new TaskConfig()
-                .setOwner(new Identity(ROLE, USER))
-                .setEnvironment(environment)
-                .setJobName(jobName)
+                .setOwner(new Identity(jobConfig.getRole(), jobConfig.getRole()))
+                .setEnvironment(jobConfig.getEnvironment())
+                .setJobName(jobConfig.getJobName())
                 .setContactEmail("smadan@paypal.com")
                 .setExecutorConfig(new ExecutorConfig("AuroraExecutor", task))
-                .setNumCpus(cpu)
-                .setRamMb(ram)
-                .setDiskMb(disk)
-                .setProduction(production)
-                .setConstraints(constraints);
+                .setNumCpus(Integer.parseInt(jobConfig.getCpu()))
+                .setRamMb(Integer.parseInt(jobConfig.getRam()))
+                .setDiskMb(Integer.parseInt(jobConfig.getDisk()))
+                .setProduction(true)
+                .setConstraints(getConstraints(jobConfig));
     }
 
     private  Set<Constraint> getConstraints(JobConfig jobConfig){
