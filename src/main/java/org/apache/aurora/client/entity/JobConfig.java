@@ -14,6 +14,15 @@ public class JobConfig {
     private String execConfig;
     private String constraintName;
     private String constraintValue;
+    private String role;
+
+    public String getRole() {
+        return role;
+    }
+
+    public void setRole(String role) {
+        this.role = role;
+    }
 
     public String getConstraintName() {
         return constraintName;

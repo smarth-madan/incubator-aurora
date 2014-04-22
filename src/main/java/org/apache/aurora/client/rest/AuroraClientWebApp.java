@@ -23,25 +23,25 @@ public class AuroraClientWebApp {
         return "Hello";
     }
 
-    @POST()
-    @Path("/createjob")
-    public String createJob(@QueryParam("aSchedulerAddr") String aSchedulerAddr,
-                            @QueryParam("aSchedulerPort") String aSchedulerPort,
-                            @QueryParam("jobName") String jobName,
-                            @QueryParam("environment") String environment,
-                            @QueryParam("cpu") String cpu,
-                            @QueryParam("ram") String ram,
-                            @QueryParam("disk") String disk,
-                            @QueryParam("execConfig") String execConfig) {
-        AuroraClient ac = new AuroraClient();
-        ac.createClient(aSchedulerAddr,aSchedulerPort);
-        String ret = ac.createJob(jobName,environment,Integer.parseInt(cpu),Integer.parseInt(ram),Integer.parseInt(disk),execConfig);
-        ac.closeClient();
-        return ret;
-    }
+//    @POST()
+//    @Path("/createjob")
+//    public String createJob(@QueryParam("aSchedulerAddr") String aSchedulerAddr,
+//                            @QueryParam("aSchedulerPort") String aSchedulerPort,
+//                            @QueryParam("jobName") String jobName,
+//                            @QueryParam("environment") String environment,
+//                            @QueryParam("cpu") String cpu,
+//                            @QueryParam("ram") String ram,
+//                            @QueryParam("disk") String disk,
+//                            @QueryParam("execConfig") String execConfig) {
+//        AuroraClient ac = new AuroraClient();
+//        ac.createClient(aSchedulerAddr,aSchedulerPort);
+//        String ret = ac.createJob(jobName,environment,Integer.parseInt(cpu),Integer.parseInt(ram),Integer.parseInt(disk),execConfig);
+//        ac.closeClient();
+//        return ret;
+//    }
 
     @POST()
-    @Path("/createjob2")
+    @Path("/createjob")
     @Produces(MediaType.APPLICATION_JSON)
     @Consumes(MediaType.APPLICATION_JSON)
     public Response createJob(JobConfig jobConfig,

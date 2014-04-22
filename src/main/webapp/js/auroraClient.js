@@ -7,6 +7,9 @@ var indexedDB = window.indexedDB || window.webkitIndexedDB || window.mozIndexedD
     IDBTransaction = window.IDBTransaction || window.webkitIDBTransaction || window.OIDBTransaction || window.msIDBTransaction,
     db,
     dbVersion = 1.0;
+var processes = [];
+var task;
+var job;
 
 var jobObj = {
 	priority: 0,
@@ -27,8 +30,8 @@ var taskObj = {
 		max_failures: 1,
     max_concurrency: 0,
     resources: {
-      disk: 134217728,
-      ram: 134217728,
+      disk: 256,
+      ram: 500,
       cpu: 1
     },
 		constraints: [
@@ -51,11 +54,23 @@ var processObj = {
 
 $("#createJob").submit(function (event) {
     event.preventDefault();
-    daily = false;
     //callCreateJob();
-    callCreateJob2();
+    callCreateJob(event.target.getAttribute("id"));
     return false;
 });
+
+
+$("#createJobAdvanced").submit(function (event) {
+    event.preventDefault();
+    //callCreateJob();
+    callCreateJob(event.target.getAttribute("id"));
+    return false;
+});
+
+$('#jobtab a').click(function (e) {
+  e.preventDefault();
+  //$(this).tab('show');
+})
 
 function getExecConfig() {
 	jobObj.task = taskObj;
@@ -90,88 +105,66 @@ function flatten(obj) {
     return result;
 }
 
-var callCreateJob = function () {
-    var aSchedulerAddr = $("#aSchedulerAddr").val();
-//    var aSchedulerPort = $("#aSchedulerPort").val();
-		var aSchedulerPort = '8082';
-    var jobName = $("#jobName").val();
-    var environment = $("#environment").val();
-    var cpu = $("#cpu").val();
-    var ram = $("#ram").val();
-    var disk = $("#disk").val();
-    //    var execConfig = $("#execConfig").val();
-		var execConfig = getExecConfig();
-		if (!execConfig && execConfig.length == 0) {
-			alert('There is no command to process');
-			return;
-		}
-    var create_job_url = API_URL + "/createjob?aSchedulerAddr=" + aSchedulerAddr + "&aSchedulerPort=" + aSchedulerPort + "&" +
-        "jobName=" + jobName + "&environment=" + environment + "&cpu=" + cpu + "&ram=" + ram + "&disk=" + disk + "&execConfig=" + execConfig;
+//var callCreateJob = function () {
+//    var aSchedulerAddr = $("#aSchedulerAddr").val();
+////    var aSchedulerPort = $("#aSchedulerPort").val();
+//		var aSchedulerPort = '8082';
+//    var jobName = $("#jobName").val();
+//    var environment = $("#environment").val();
+//    var cpu = $("#cpu").val();
+//    var ram = $("#ram").val();
+//    var disk = $("#disk").val();
+//    //    var execConfig = $("#execConfig").val();
+//		var execConfig = getExecConfig();
+//		if (!execConfig && execConfig.length == 0) {
+//			alert('There is no command to process');
+//			return;
+//		}
+//    var create_job_url = API_URL + "/createjob?aSchedulerAddr=" + aSchedulerAddr + "&aSchedulerPort=" + aSchedulerPort + "&" +
+//        "jobName=" + jobName + "&environment=" + environment + "&cpu=" + cpu + "&ram=" + ram + "&disk=" + disk + "&execConfig=" + execConfig;
+//
+//    $.ajax({
+//        url: create_job_url,
+//        method: "POST",
+//        success: function (data) {
+//            $("#result").text(data);
+//            var link="http://"+aSchedulerAddr+":8081/scheduler/knagireddy/"+environment+"/"+jobName;
+//            $("#linkToJob").html("<a href="+link+" target=\"_blank\">"+link+"</a>");
+//            addJobs('knagireddy',jobName, link);
+//            $("#example").modal("toggle");
+//            var jobTbl = $("#jobtblbody")[0];
+//            var row = jobTbl.insertRow(-1);
+//            var cell1 = row.insertCell(0);
+//            var cell2 = row.insertCell(1);
+//            var cell3 = row.insertCell(2);
+//            var cell4 = row.insertCell(3);
+//            cell2.innerHTML = jobName;
+//            cell3.innerHTML = "<a href="+link+" target=\"_blank\">"+link+"</a>";
+//            cell4.innerHTML = new Date();
+//
+//        },
+//        error: function (chr, data, error) {
+//            attDailyJson = data;
+//        },
+//        complete: function (xhr, textStatus) {
+//            attDailyJson = textStatus;
+//        }
+//    }).done(function (data, textStatus, xhr) {
+//        if (console && console.log) {
+//            console.log("Sample of data:", data);
+//        }
+//    });
+//}
 
-    $.ajax({
-        url: create_job_url,
-        method: "POST",
-        success: function (data) {
-            $("#result").text(data);
-            var link="http://"+aSchedulerAddr+":8081/scheduler/knagireddy/"+environment+"/"+jobName;
-            $("#linkToJob").html("<a href="+link+" target=\"_blank\">"+link+"</a>");
-            addJobs('knagireddy',jobName, link);
-            $("#example").modal("toggle");
-            var jobTbl = $("#jobtblbody")[0];
-            var row = jobTbl.insertRow(-1);
-            var cell1 = row.insertCell(0);
-            var cell2 = row.insertCell(1);
-            var cell3 = row.insertCell(2);
-            var cell4 = row.insertCell(3);
-            cell2.innerHTML = jobName;
-            cell3.innerHTML = "<a href="+link+" target=\"_blank\">"+link+"</a>";
-            cell4.innerHTML = new Date();
+var callCreateJob = function (formId) {
+    var create_job_url = API_URL + "/createjob";
 
-        },
-        error: function (chr, data, error) {
-            attDailyJson = data;
-        },
-        complete: function (xhr, textStatus) {
-            attDailyJson = textStatus;
-        }
-    }).done(function (data, textStatus, xhr) {
-        if (console && console.log) {
-            console.log("Sample of data:", data);
-        }
-    });
-}
-
-var callCreateJob2 = function () {
-    var aSchedulerAddr = $("#aSchedulerAddr").val();
-//    var aSchedulerPort = $("#aSchedulerPort").val();
-    var aSchedulerPort = '8082';
-    var jobName = $("#jobName").val();
-    var environment = $("#environment").val();
-    var cpu = $("#cpu").val();
-    var ram = $("#ram").val();
-    var disk = $("#disk").val();
-    var cname = $("#cname").val();
-    var cvalue = $("#cvalue").val();
-    //    var execConfig = $("#execConfig").val();
-		var execConfig = getExecConfig();
-		if (!execConfig && execConfig.length == 0) {
-			alert('There is no command to process');
-			return;
-		}
-    var create_job_url = API_URL + "/createjob2";
-
-    var sendData = {
-        aSchedulerAddr: aSchedulerAddr,
-        aSchedulerPort: aSchedulerPort,
-        jobName: jobName,
-        environment: environment,
-        cpu: cpu,
-        ram: ram,
-        disk: disk,
-        execConfig: execConfig,
-        constraintName: cname,
-        constraintValue: cvalue
+    var sendData = getSendData(formId);
+    if(!sendData.execConfig && sendData.execConfig.length ==0){
+        alert('There is no command to process');
+    		return;
     }
+
     $.ajax({
         url: create_job_url,
         method: "POST",
@@ -184,9 +177,9 @@ var callCreateJob2 = function () {
         contentType:"application/json",
         success: function (data) {
             $("#result").text(data);
-            var link="http://"+aSchedulerAddr+":8081/scheduler/knagireddy/"+environment+"/"+jobName;
+            var link="http://"+aSchedulerAddr+":8081/scheduler/"+sendData.role+"/"+sendData.environment+"/"+sendData.jobName;
             $("#linkToJob").html("<a href="+link+" target=\"_blank\">"+link+"</a>");
-            addJobs('knagireddy',jobName, link);
+            addJobs(sendData.role,sendData.jobName, link);
             $("#example").modal("toggle");
             var jobTbl = $("#jobtblbody")[0];
             var row = jobTbl.insertRow(-1);
@@ -212,31 +205,57 @@ var callCreateJob2 = function () {
     });
 }
 
-    function addCommand(ele) {
-        var commandFragment = $("#commandTemplate").html();
+function addCommand(ele) {
+    var commandFragment = $("#commandTemplate").html();
 
-        if ($('#commandContainer').children().length == 0) {
-            $("#commandContainer").append(commandFragment);
-        } else {
-            $(ele).parent().after(commandFragment);
-        }
-
-        $('.btnRemoveCommand').unbind('click');
-        $('.btnRemoveCommand').click(function () {
-            $(this).parent().remove();
-            if ($('#commandContainer').children().length == 0) {
-                $('#btnNewCommand').show();
-            }
-        });
-
-        $('.btnAddCommand').unbind('click');
-        $('.btnAddCommand').click(function () {
-            addCommand(this);
-        });
-
-        $('#btnNewCommand').hide();
-				$('#commandContainer').last().find('.txtCommand').focus();
+    if ($('#commandContainer').children().length == 0) {
+        $("#commandContainer").append(commandFragment);
+    } else {
+        $(ele).parent().after(commandFragment);
     }
+
+    $('.btnRemoveCommand').unbind('click');
+    $('.btnRemoveCommand').click(function () {
+        $(this).parent().remove();
+        if ($('#commandContainer').children().length == 0) {
+            $('#btnNewCommand').show();
+        }
+    });
+
+    $('.btnAddCommand').unbind('click');
+    $('.btnAddCommand').click(function () {
+        addCommand(this);
+    });
+
+    $('#btnNewCommand').hide();
+            $('#commandContainer').last().find('.txtCommand').focus();
+}
+
+function addProcess(ele) {
+    var processFragment = $("#processTemplate").html();
+
+    if ($('#processContainer').children().length == 0) {
+        $("#processContainer").append(processFragment);
+    } else {
+        $(ele).parent().after(processFragment);
+    }
+
+    $('.btnPRemoveCommand').unbind('click');
+    $('.btnPRemoveCommand').click(function () {
+        $(this).parent().remove();
+        if ($('#processContainer').children().length == 0) {
+            $('#btnNewCommand').show();
+        }
+    });
+
+    $('.btnPAddCommand').unbind('click');
+    $('.btnPAddCommand').click(function () {
+        addProcess(this);
+    });
+
+    $('#btnNewCommand').hide();
+            $('#commandContainer').last().find('.txtCommand').focus();
+}
 
     //All the form filling javascripts.
 $(document).ready(function () {
@@ -247,6 +266,7 @@ $(document).ready(function () {
 		
 		// Empty command
 		addCommand(null);
+		addProcess(null);
 		$('#jobName').focus();
 });
 
@@ -256,6 +276,38 @@ $(function () {
   var context = {
     color: "blue"
   };
+  $("#pNext").click(function(e) {
+               e.preventDefault();
+               getProcesses();
+               $('#jobtab li a[href="#task"]').tab("show")
+             });
+  $("#tNext").click(function(e) {
+                 e.preventDefault();
+                 getTask();
+                 $('#jobtab li a[href="#job"]').tab("show")
+               });
+  $("#tBack").click(function(e) {
+                  e.preventDefault();
+                  $('#jobtab li a[href="#process"]').tab("show")
+                });
+//  $("#jNext").click(function(e) {
+//                 e.preventDefault();
+//                 $('#jobtab li a[href="#process"]').tab("show")
+//               });
+  $("#jBack").click(function(e) {
+                  e.preventDefault();
+                  $('#jobtab li a[href="#task"]').tab("show")
+                });
+
+    $( "#pOrderParallel" ).change(function(e) {
+        if(!e.target.checked){
+            $('.gridlyDiv').show();
+        }else{
+            $('.gridlyDiv').hide();
+        }
+
+    });
+
 });
 
 document.addEventListener("DOMContentLoaded", function(){
@@ -367,4 +419,161 @@ function addJobs(username, jobName, jobUrl) {
     request.onsuccess = function(e,job) {
         console.log("Woot! Did it");
     }
+}
+
+function getProcesses() {
+	var newProcesses = [];
+
+    //    var processObj = {
+    //        daemon: false,
+    //        name: '',
+    //        ephemeral: false,
+    //        max_failures: 1,
+    //        min_duration: 5,
+    //        cmdline: '',
+    //        final: false
+    //    };
+
+    var pTemplate =$.parseHTML($("#pOrderTemplate").html())[1];
+	$('#processContainer').children('').each(function () {
+	    var newPTemplate = pTemplate.cloneNode();
+		var newProcess = Object.create(processObj);
+		newProcess.name = $(this).find(".pName").val();
+		newProcess.cmdline=$(this).find('.pCommand').val();
+		newProcess.daemon=$(this).find(".pDaemon").val();
+		newProcess.ephemeral=$(this).find(".pEphemeral").val();
+		newProcess.max_failures=$(this).find(".pMaxFail").val();
+		newProcess.min_duration=$(this).find(".pMinDuration").val();
+		newProcess.final=$(this).find(".pFinal").val();
+		newPTemplate.innerHTML =  newProcess.name;
+		$("#pgOrder").append(newPTemplate);
+
+		// Need to do this 'cos of JS inheritence
+		var newProcessStr = JSON.stringify(flatten(newProcess));
+		var newProcessObj = eval("("+ newProcessStr  + ")");
+		processes.push(newProcessObj);
+	});
+    $('.gridly').gridly({
+        base: 60, // px
+        gutter: 20, // px
+        columns: 5
+      });
+	return JSON.stringify(processes);
+}
+
+function getTask() {
+	var newProcesses = [];
+
+
+    //        var taskObj = {
+    //        		processes: [], //Array of process objects
+    //            name: 'process1',
+    //            finalization_wait: 30,
+    //        		max_failures: 1,
+    //            max_concurrency: 0,
+    //            resources: {
+    //              disk: 134217728,
+    //              ram: 134217728,
+    //              cpu: 1
+    //            },
+    //        		constraints: [
+    //        			{
+    //                order: [] //Array of process names
+    //        			}
+    //        		]
+    //        };
+    taskObj.constraints= [{order: [] }];
+    if(!$("#pOrderParallel").is(':checked')){
+        var elements=$(".gridly > div");
+        var order="";
+        elements.sort(function(a,b)
+        {
+            aLeft = $(a).css("left");
+            aLeft = aLeft.substr(0,aLeft.length-2);
+            bLeft = $(b).css("left");
+            bLeft = bLeft.substr(0,bLeft.length-2);
+            return aLeft-bLeft ;
+        })
+        $(elements).each(function (){
+            taskObj.constraints[0].order.push($(this).html());
+        });
+    }
+    taskObj.processes=processes;
+    taskObj.name=$("#tName").val();
+    taskObj.finalization_wait=$("#tFinalWait").val();
+    taskObj.max_failures=$("#tMaxFail").val();
+    taskObj.max_concurrency=$("#tMaxConcurr").val();
+    taskObj.resources.disk=$("#tdisk").val();
+    taskObj.resources.ram=$("#tram").val();
+    taskObj.resources.cpu=$("#tcpu").val();
+
+    return JSON.stringify(taskObj);
+}
+
+function addProcessGrid(){
+ var pTemplate =$.parseHTML($("#pOrderTemplate").html())[1];
+ var node = $.parseHTML(pTemplate);
+}
+
+function getJob() {
+	var newProcesses = [];
+
+
+    //var jobObj = {
+    //	priority: 0,
+    //	task: new Object(),
+    //	name: 'job1',
+    //	environment: 'prod',
+    //	max_task_failures: 1,
+    //	enable_hooks: false,
+    //	cluster: 'example',
+    //	production: false,
+    //	role: 'knagireddy'
+    //};
+
+    jobObj.task=taskObj;
+    jobObj.name=$("#jName").val();
+    jobObj.environment=$("#jEnvironment").val();
+    jobObj.max_task_failures=$("#jMaxTFailures").val();
+    jobObj.enable_hooks=$("#jEnableHooks").val();
+    jobObj.production=$("#jProduction").val();
+    jobObj.role=$("#jRole").val();
+
+    return JSON.stringify(jobObj);
+}
+
+function getSendData(formId) {
+    if(formId=="createJobAdvanced"){
+        getJob();
+        var sendData = {
+                aSchedulerAddr: $("#jASchedulerAddr").val(),
+                aSchedulerPort: '8082',
+                jobName: jobObj.name,
+                environment: jobObj.environment,
+                cpu: taskObj.resources.cpu,
+                ram: taskObj.resources.ram,
+                disk: taskObj.resources.disk,
+                execConfig: JSON.stringify(jobObj),
+                constraintName: $("#tcname").val(),
+                constraintValue: $("#tcvalue").val(),
+                role: jobObj.role
+            }
+    }
+    else{
+        var sendData = {
+            aSchedulerAddr: $("#aSchedulerAddr").val(),
+            aSchedulerPort: '8082',
+            jobName: $("#jobName").val(),
+            environment: $("#environment").val(),
+            cpu: $("#cpu").val(),
+            ram: $("#ram").val(),
+            disk: $("#disk").val(),
+            execConfig: getExecConfig(),
+            constraintName: $("#cname").val(),
+            constraintValue: $("#cvalue").val(),
+            role: $("#role").val()
+        }
+    }
+
+    return sendData;
 }

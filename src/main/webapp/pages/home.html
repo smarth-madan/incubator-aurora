@@ -2,10 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>Aurora Test</title>
+    <title>Aurora Client</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="../lib/bootstrap/css/bootstrap.css">
     <link rel="stylesheet" href="../css/aurora.css">
+    <link href="../lib/gridly/stylesheets/jquery.gridly.css" rel="stylesheet" type="text/css" />
 </head>
 
 <body>
@@ -62,7 +63,7 @@
 <!-- New Job Modal -->
 <div class="container">
 
-    <div id="example" class="modal fade bs-example-modal-lg" style="display: none;" ref="modal"
+    <div id="simplemodal" class="modal fade bs-example-modal-lg" style="display: none;" ref="modal"
          role="dialog" aria-hidden="true" tabIndex="-1">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
@@ -80,6 +81,12 @@
                                     <fieldset>
                                         <legend>1. Job Information</legend>
                                         <div class="form-group">
+                                            <label class="control-label col-md-3" for="role">Role</label>
+                                            <div class="col-md-9 controls">
+                                                <input type="text" id="role" placeholder="vagrant">
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
                                             <label class="control-label col-md-3" for="jobName">Job Name</label>
                                             <div class="col-md-9 controls">
                                                 <input type="text" id="jobName" placeholder="hello_world">
@@ -88,7 +95,7 @@
                                         <div class="form-group inline-block  ">
                                             <label class="control-label col-md-3" for="aSchedulerAddr">Aurora Scheduler</label>
                                             <div class="col-md-9 controls inline">
-                                                <input id="aSchedulerAddr" placeholder="IP Address of Aurora Scheduler" value="192.168.33.6">
+                                                <input id="aSchedulerAddr" placeholder="IP Address of Aurora Scheduler" value="stage2p1137.qa.paypal.com">
                                             </div>
                                         </div>
                                         <div class="form-group inline-block  ">
@@ -170,7 +177,7 @@
                                 <div>
                                     <fieldset>
                                         <div class="form-group">
-                                            <div class="col-md-9 controls">
+                                            <div class="col-md-9 controls hide">
                                                 <p type="text" id="result"></p>
                                                 <div id="linkToJob"></div>
                                             </div>
@@ -186,25 +193,288 @@
                         <button class="btn btn-link" type="button" data-dismiss="modal">
                             Cancel
                         </button>
+                        <input type="button" class="btn btn-primary" value="Advanced options" data-dismiss="modal" data-toggle="modal" href="#advancedmodal">
                         <!--<input class="formSubmit" type="submit" value="Clear">-->
                         <input type="submit" class="btn btn-primary" value="Create" />
                     </div>
 
-                    <!--
-                    <div class="modal-footer">
-                      <button class="btn btn-sm btn-danger" data-dismiss="modal">
-                        Destroy
-                      </button>
-                      <button class="btn btn-sm btn-default"
-                          onClick={this.suspendApp} disabled={this.props.model.get("instances") < 1}>
-                        Suspend
-                      </button>
-                      <button class="btn btn-sm btn-default" onClick={this.scaleApp}>
-                        Scale
-                      </button>
-                    </div>-->
                  </form>
 
+            </div>
+        </div>
+    </div>
+    <div id="advancedmodal" class="modal fade bs-example-modal-lg" style="display: none;" ref="modal"
+         role="dialog" aria-hidden="true" tabIndex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <form class="form-horizontal" role="form" id="createJobAdvanced">
+                    <div class="modal-header">
+                        <a class="close" data-dismiss="modal">×</a>
+                        <h3 class="modal-title">NEW JOB</h3>
+                    </div>
+                    <div class="modal-body">
+                        <div class="hero-unit">
+                            <ul class="nav nav-tabs" id="jobtab">
+                                <li class="active"><a href="#process" data-toggle="tab">Processes</a></li>
+                                <li><a href="#task" data-toggle="tab">Task</a></li>
+                                <li><a href="#job" data-toggle="tab">Job</a></li>
+                            </ul>
+                        </div>
+                        <div id="myTabContent" class="tab-content">
+                            <div class="tab-pane fade active" id="process">
+                                <fieldset>
+                                    <legend> </legend>
+                                    <div id="processContainer"></div>
+                                    <div class="row pull-right">
+                                        <button class="btn btn-link" type="button" data-dismiss="modal">Cancel</button>
+                                        <button class="btn btn-primary" id="pNext" onclick="">Next</button>
+                                    </div>
+                                    <script id="processTemplate" type="text/x-handlebars-template">
+                                        <div class="process">
+                                            <div class="row">
+                                                <div class="col-md-6">
+                                                    <div class="form-group inline-block">
+                                                        <label class="control-label col-md-3" for="pName">Name</label>
+                                                        <div class="controls col-md-9">
+                                                            <input class="pName" type="text" id="pName" placeholder="process1">
+                                                        </div>
+                                                    </div>
+                                                    <div class="form-group">
+                                                        <label class="control-label col-md-3 " >Command</label>
+                                                        <div class="controls col-md-9">
+                                                            <textarea class="txtCommand pCommand" rows="3" cols="50" placeholder="provide a command.."/>
+                                                        </div>
+                                                    </div>
+                                                    <div class="form-group inline-block">
+                                                        <label class="control-label col-md-3" for="pMaxFail">Max Failures</label>
+                                                        <div class="controls col-md-9">
+                                                            <input type="text" id="pMaxFail" class="pMaxFail" placeholder="1" value="1">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <div class="form-group">
+                                                        <label class="control-label col-md-3" for="pDaemon">Daemon</label>
+                                                        <div class="controls col-md-9">
+                                                            <select id="pDaemon" class="pDaemon">
+                                                                <option>false</option>
+                                                                <option>true</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                    <div class="form-group">
+                                                        <label class="control-label col-md-3" for="pEphemeral">Ephemeral</label>
+                                                        <div class="controls col-md-9">
+                                                            <select id="pEphemeral" class="pEphemeral">
+                                                                <option>false</option>
+                                                                <option>true</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                    <div class="form-group">
+                                                        <label class="control-label col-md-3" for="pFinal">Final</label>
+                                                        <div class="controls col-md-9">
+                                                            <select id="pFinal" class="pFinal">
+                                                                <option>false</option>
+                                                                <option>true</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                    <div class="form-group inline-block">
+                                                        <label class="control-label col-md-3" for="pMinDuration">Min Duration</label>
+                                                        <div class="controls col-md-9">
+                                                            <input type="text" id="pMinDuration" class="pMinDuration" placeholder="5" value="5">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <span class="btnPRemoveCommand label label-big">-</span>
+                                            <span class="btnPAddCommand label label-big">+</span>
+                                        </div>
+                                    </script>
+                                </fieldset>
+                            </div>
+                            <div class="tab-pane fade" id="task">
+                                <fieldset>
+                                    <legend> </legend>
+                                    <div class="task">
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <div class="form-group inline-block">
+                                                    <label class="control-label col-md-3" for="tName">Task Name</label>
+                                                    <div class="controls col-md-9">
+                                                        <input type="text" id="tName" placeholder="process1" value="">
+                                                    </div>
+                                                </div>
+                                                <div class="form-group inline-block">
+                                                    <label class="control-label col-md-3" for="tMaxFail">Max Failures</label>
+                                                    <div class="controls col-md-9">
+                                                        <input type="text" id="tMaxFail" placeholder="1" value="1">
+                                                    </div>
+                                                </div>
+                                                <div class="form-group inline-block">
+                                                    <label class="control-label col-md-3" for="tMaxConcurr">Max Concurrency</label>
+                                                    <div class="controls col-md-9">
+                                                        <input type="text" id="tMaxConcurr" placeholder="1" value="0">
+                                                    </div>
+                                                </div>
+                                                <div class="form-group inline-block">
+                                                    <label class="control-label col-md-3" for="tFinalWait">Finalization wait</label>
+                                                    <div class="controls col-md-9">
+                                                        <input type="text" id="tFinalWait" placeholder="1" value="30">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <div class="form-group">
+                                                    <label class="control-label col-md-3" for="tcpu">CPU</label>
+                                                    <div class="col-md-9 controls">
+                                                        <input type="text" id="tcpu" placeholder="No. of CPU" value="1">
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="control-label col-md-3" for="tram">RAM(MB)</label>
+                                                    <div class="col-md-9 controls">
+                                                        <input type="text" id="tram" placeholder="Ram in MB" value="256">
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="control-label col-md-3" for="tdisk">Disk(MB)</label>
+                                                    <div class="col-md-9 controls">
+                                                        <input type="text" id="tdisk" placeholder="Disk in MB" value="500">
+                                                    </div>
+                                                </div>
+                                                <div class="form-group inline-block  ">
+                                                    <label class="control-label col-md-2" for="tconstraints">Constraints(optional):</label>
+                                                    <div id="tconstraints"></div>
+                                                </div>
+                                                <div class="form-group inline-block  ">
+                                                    <label class="control-label col-md-1" for="tcname">name:</label>
+                                                    <div class="col-md-3 controls inline">
+                                                        <input id="tcname" placeholder="" value="">
+                                                    </div>
+                                                    <label class="control-label col-md-3" for="tcvalue">value:</label>
+                                                    <div class="col-md-3 controls inline">
+                                                        <input id="tcvalue" placeholder="" value="">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="row">
+                                            <div class="col-md-10 form-group inline-block">
+                                                <label class="control-label col-md-2" for="pOrder">Order</label>
+                                                <div class="" id="pOrder">
+                                                    <div class="row">
+                                                        <div class="controls inline checkbox col-md-3">
+                                                            <label>
+                                                                <input type="checkbox" checked="checked" id="pOrderParallel" class="text-primary checkbox"> Parallel execution
+                                                            </label>
+                                                        </div>
+                                                    </div>
+                                                    <div class="row gridlyDiv">
+                                                        <label class="control-label col-md-3" for="pgOrder">Drag and select the order:</label>
+                                                        <div class="gridly col-md-offset-3" id="pgOrder">
+                                                            <script id="pOrderTemplate" type="text/x-handlebars-template">
+                                                                <div class="brick small form-control arrow_box">
+                                                                </div>
+                                                            </script>
+                                                            <!--<div class="brick small form-control">p1</div>-->
+                                                            <!--<div class="brick small form-control">p2</div>-->
+                                                            <!--<div class="brick small form-control">p3</div>-->
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="row pull-right">
+                                            <button class="btn btn-link" type="button" data-dismiss="modal">Cancel</button>
+                                            <button class="btn btn-link" id="tBack">back</button>
+                                            <button class="btn btn-primary" id="tNext" onclick="">next</button>
+                                        </div>
+                                    </div>
+                                </fieldset>
+                             </div>
+                            <div class="tab-pane fade" id="job">
+                                <fieldset>
+                                    <legend> </legend>
+                                    <div class="task">
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <div class="form-group inline-block">
+                                                    <label class="control-label col-md-3" for="jName">Job Name</label>
+                                                    <div class="controls col-md-9">
+                                                        <input type="text" id="jName" placeholder="process1" value="">
+                                                    </div>
+                                                </div>
+                                                <div class="form-group inline-block">
+                                                    <label class="control-label col-md-3" for="jEnvironment">Environment</label>
+                                                    <div class="col-md-9 controls">
+                                                        <select id="jEnvironment">
+                                                            <option>devel</option>
+                                                            <option>prod</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group inline-block">
+                                                    <label class="control-label col-md-3" for="jMaxTFailures">Max Task Failures</label>
+                                                    <div class="controls col-md-9">
+                                                        <input type="text" id="jMaxTFailures" placeholder="1" value="1">
+                                                    </div>
+                                                </div>
+                                                <div class="form-group inline-block">
+                                                    <label class="control-label col-md-3" for="jEnableHooks">Enable Hooks</label>
+                                                    <div class="controls col-md-9">
+                                                        <select id="jEnableHooks">
+                                                            <option>false</option>
+                                                            <option>true</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <div class="form-group">
+                                                    <div class="form-group inline-block  ">
+                                                        <label class="control-label col-md-3" for="jASchedulerAddr">Aurora Scheduler</label>
+                                                        <div class="col-md-9 controls inline">
+                                                            <input id="jASchedulerAddr" placeholder="IP Address of Aurora Scheduler" value="stage2p1137.qa.paypal.com">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="control-label col-md-3" for="jProduction">Production</label>
+                                                    <div class="controls col-md-9">
+                                                        <select id="jProduction">
+                                                            <option>false</option>
+                                                            <option>true</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="control-label col-md-3" for="jRole">Role</label>
+                                                    <div class="col-md-9 controls">
+                                                        <input type="text" id="jRole" value="vagrant">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="row pull-right">
+                                            <button class="btn btn-link" type="button" data-dismiss="modal">Cancel</button>
+                                            <button class="btn btn-link" id="jBack">back</button>
+                                            <button class="btn btn-primary" id="jNext" type="submit" onclick="">Submit</button>
+                                        </div>
+                                    </div>
+                                </fieldset>
+                            </div>
+                        </div>
+                    </div>
+                    <!--<div class="modal-footer">-->
+                        <!--<button class="btn btn-link" type="button" data-dismiss="modal">-->
+                            <!--Cancel-->
+                        <!--</button>-->
+                        <!--&lt;!&ndash;<input class="formSubmit" type="submit" value="Clear">&ndash;&gt;-->
+                        <!--<input type="submit" class="btn btn-primary" value="Create" />-->
+                    <!--</div>-->
+                    </form>
             </div>
         </div>
     </div>
@@ -212,7 +482,7 @@
 
 <div class="container text-right">
     <div id="newJob">
-        <button type="button" class="btn btn-primary header-btn" data-toggle="modal" href="#example">
+        <button type="button" class="btn btn-primary header-btn" data-toggle="modal" href="#simplemodal">
             + Schedule new Job
         </button>
     </div>
@@ -224,9 +494,15 @@
 
 
 <script src="../lib/jquery.js"></script>
+<script src="//code.jquery.com/jquery-1.10.2.js"></script>
 <script src="../lib/handlebars-v1.3.0.js"></script>
 <script src="../lib/bootstrap/js/bootstrap.js"></script>
+<script src="../lib/jquery-ui-1.10.4.custom.js"></script>
+<link rel="stylesheet" href="//code.jquery.com/ui/1.10.4/themes/smoothness/jquery-ui.css">
+<script src="//code.jquery.com/ui/1.10.4/jquery-ui.js"></script>
 <script src="../js/auroraClient.js"></script>
+<script src="../lib/gridly/javascripts/jquery.gridly.js" type="text/javascript"></script>
+
 
 </body>
 </html>
