@@ -18,11 +18,6 @@ import org.apache.aurora.client.entity.ReturnStatus;
 public class AuroraClientWebApp {
     //private static AuroraClient auroraClient = new AuroraClient();
 
-    @GET()
-    public String hello() {
-        return "Hello";
-    }
-
 //    @POST()
 //    @Path("/createjob")
 //    public String createJob(@QueryParam("aSchedulerAddr") String aSchedulerAddr,
@@ -55,5 +50,23 @@ public class AuroraClientWebApp {
         return Response.status(Response.Status.CREATED)
                 .entity(returnStatus).type(MediaType.APPLICATION_JSON)
                 .build();
+    }
+
+    @POST()
+    @Path("killjob")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.APPLICATION_JSON)
+    public Response killJob(JobConfig jobConfig,
+                              @Context HttpServletRequest request,
+                              @Context HttpServletResponse response) {
+        AuroraClient ac = new AuroraClient();
+        ac.createClient(jobConfig.getaSchedulerAddr(),jobConfig.getaSchedulerPort());
+        String ret = ac.killJob(jobConfig);
+        ReturnStatus returnStatus = new ReturnStatus(0,ret);
+        ac.closeClient();
+        return Response.status(Response.Status.CREATED)
+                .entity(returnStatus).type(MediaType.APPLICATION_JSON)
+                .build();
+
     }
 }

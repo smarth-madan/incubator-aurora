@@ -179,7 +179,7 @@ var callCreateJob = function (formId) {
             $("#result").text(data);
             var link="http://"+sendData.aSchedulerAddr+":8081/scheduler/"+sendData.role+"/"+sendData.environment+"/"+sendData.jobName;
             $("#linkToJob").html("<a href="+link+" target=\"_blank\">"+link+"</a>");
-            addJobs(sendData.role,sendData.jobName, link);
+            addJobs(sendData.role,sendData.jobName, sendData.environment, sendData.aSchedulerAddr,sendData.aSchedulerPort,link, JSON.stringify(sendData));
             $("#example").modal("toggle");
             var jobTbl = $("#jobtblbody")[0];
             var row = jobTbl.insertRow(-1);
@@ -392,7 +392,7 @@ function refreshData(){
 
 }
 
-function addJobs(username, jobName, jobUrl) {
+function addJobs(username, jobName, environment,scheduler,port, jobUrl, sendData) {
 
 
     console.log("About to add "+jobName+":"+jobUrl);
@@ -405,7 +405,11 @@ function addJobs(username, jobName, jobUrl) {
         username:username,
         jobname:jobName,
         joburl:jobUrl,
-        created:new Date()
+        created:new Date(),
+        scheduler:scheduler,
+        port:port,
+        environment:environment,
+        sendData:sendData
     }
 
     //Perform the add

@@ -5,8 +5,6 @@ import org.apache.aurora.gen.*;
 import org.apache.aurora.scheduler.base.JobKeys;
 import org.apache.aurora.scheduler.storage.entities.IJobConfiguration;
 import org.apache.aurora.scheduler.storage.entities.IJobKey;
-import org.apache.aurora.scheduler.storage.entities.ILock;
-import org.apache.aurora.scheduler.storage.entities.ILockKey;
 import org.apache.thrift.TException;
 import org.apache.thrift.protocol.TBinaryProtocol;
 import org.apache.thrift.protocol.TProtocol;
@@ -22,23 +20,11 @@ import static org.apache.aurora.gen.apiConstants.DEFAULT_ENVIRONMENT;
  * Created by smadan on 3/27/14.
  */
 public class AuroraClient{
-    private static final String ROLE = "knagireddy";
-    private static final String USER = "knagireddy";
     private static final String JOB_NAME = "hello_world";
-    private static final IJobKey JOB_KEY = JobKeys.from(ROLE, DEFAULT_ENVIRONMENT, JOB_NAME);
     private static final SessionKey SESSION = new SessionKey();
-    private static final ILockKey LOCK_KEY = ILockKey.build(LockKey.job(JOB_KEY.newBuilder()));
-    private static final ILock LOCK = ILock.build(new Lock().setKey(LOCK_KEY.newBuilder()));
     private static AuroraAdmin.Client client;
     private static TTransport transport;
     private static TProtocol protocol;
-
-//    public static void main(String args[]){
-//        AuroraClient ac = new AuroraClient();
-//        ac.createClient("192.168.33.6","8082");
-//        ac.killJob();
-//        ac.closeClient();
-//    }
 
 
     public void createClient(String ip, String port){
@@ -62,24 +48,21 @@ public class AuroraClient{
         client=null;
     }
 
-    public void killJob(){
+    public String killJob(JobConfig jobConfig){
 
         try {
-            Response res = client.killTasks(new TaskQuery().setOwner(new Identity(ROLE, USER)).setEnvironment("devel"),null,SESSION);
+            IJobKey jobKey= JobKeys.from(jobConfig.getRole(), jobConfig.getEnvironment(), jobConfig.getJobName());
+            Set<JobKey> jobKeys = new HashSet<JobKey>();
+            jobKeys.add(jobKey.newBuilder());
+            Response res = client.killTasks(new TaskQuery().setJobKeys(jobKeys),null,SESSION);
             System.out.println(res.getMessage());
+            return res.getMessage();
         } catch (TException e) {
             e.printStackTrace();
+            return e.getMessage();
         }
 
     }
-
-//    public String createJob(String jobName, String environment,Integer cpu, Integer ram, Integer disk,String execConfig ){
-//        IJobKey jobKey= JobKeys.from(ROLE, environment, jobName);
-//        TaskConfig task =  makeTask(jobName, true, environment, cpu, ram, disk, execConfig,null);
-//        JobConfiguration jobConfiguration = makeJob(task, jobKey);
-//        String result = sendCreateJob(jobConfiguration, ROLE);
-//        return result;
-//    }
 
     public String createJob(JobConfig jobConfig){
         IJobKey jobKey= JobKeys.from(jobConfig.getRole(), jobConfig.getEnvironment(), jobConfig.getJobName());
@@ -112,35 +95,31 @@ public class AuroraClient{
                 .setKey(jobKey.newBuilder());
     }
 
-    //public JobConfiguration makeJob(){
-    //    return makeJob(defaultTask(true), JOB_KEY);
-    //}
-
-    private TaskConfig defaultTask(boolean production) {
-
-        Set<Constraint> constraints = new HashSet<Constraint>();
-        Constraint constraint = new Constraint();
-        TaskConstraint taskConstraint = new TaskConstraint();
-        HashSet<String> value = new HashSet<String>();
-        value.add("a") ;
-        taskConstraint.setValue(new ValueConstraint(false,value));
-        constraint.setName("rack");
-        constraint.setConstraint(taskConstraint);
-        constraints.add(constraint);
-
-        String task= "{\"priority\": 0, \"task\": {\"processes\": [{\"daemon\": false, \"name\": \"hello\", \"ephemeral\": false, \"max_failures\": 1, \"min_duration\": 5, \"cmdline\": \"\\n    while true; do\\n      echo hello world\\n      sleep 10\\n    done\\n  \", \"final\": false}], \"name\": \"hello\", \"finalization_wait\": 30, \"max_failures\": 1, \"max_concurrency\": 0, \"resources\": {\"disk\": 134217728, \"ram\": 134217728, \"cpu\": 1.0}, \"constraints\": [{\"order\": [\"hello\"]}]}, \"name\": \"hello\", \"environment\": \"prod\", \"max_task_failures\": 1, \"enable_hooks\": false, \"cluster\": \"example\", \"production\": true, \"role\": \"knagireddy\"}";
-        return new TaskConfig()
-                .setOwner(new Identity(ROLE, USER))
-                .setEnvironment("prod")
-                .setJobName(JOB_NAME)
-                .setContactEmail("smadan@paypal.com")
-                .setExecutorConfig(new ExecutorConfig("AuroraExecutor",task))
-                .setNumCpus(1)
-                .setRamMb(10)
-                .setDiskMb(10)
-                .setProduction(production)
-                .setConstraints(constraints);
-    }
+//    private TaskConfig defaultTask(boolean production) {
+//
+//        Set<Constraint> constraints = new HashSet<Constraint>();
+//        Constraint constraint = new Constraint();
+//        TaskConstraint taskConstraint = new TaskConstraint();
+//        HashSet<String> value = new HashSet<String>();
+//        value.add("a") ;
+//        taskConstraint.setValue(new ValueConstraint(false,value));
+//        constraint.setName("rack");
+//        constraint.setConstraint(taskConstraint);
+//        constraints.add(constraint);
+//
+//        String task= "{\"priority\": 0, \"task\": {\"processes\": [{\"daemon\": false, \"name\": \"hello\", \"ephemeral\": false, \"max_failures\": 1, \"min_duration\": 5, \"cmdline\": \"\\n    while true; do\\n      echo hello world\\n      sleep 10\\n    done\\n  \", \"final\": false}], \"name\": \"hello\", \"finalization_wait\": 30, \"max_failures\": 1, \"max_concurrency\": 0, \"resources\": {\"disk\": 134217728, \"ram\": 134217728, \"cpu\": 1.0}, \"constraints\": [{\"order\": [\"hello\"]}]}, \"name\": \"hello\", \"environment\": \"prod\", \"max_task_failures\": 1, \"enable_hooks\": false, \"cluster\": \"example\", \"production\": true, \"role\": \"knagireddy\"}";
+//        return new TaskConfig()
+//                .setOwner(new Identity(ROLE, USER))
+//                .setEnvironment("prod")
+//                .setJobName(JOB_NAME)
+//                .setContactEmail("smadan@paypal.com")
+//                .setExecutorConfig(new ExecutorConfig("AuroraExecutor",task))
+//                .setNumCpus(1)
+//                .setRamMb(10)
+//                .setDiskMb(10)
+//                .setProduction(production)
+//                .setConstraints(constraints);
+//    }
 
     public TaskConfig makeTask(JobConfig jobConfig){
         String task= jobConfig.getExecConfig();
@@ -165,27 +144,6 @@ public class AuroraClient{
         if(!jobConfig.getConstraintName().isEmpty()) {
             constraint.setName(jobConfig.getConstraintName());
             value.add(jobConfig.getConstraintValue());
-        }else{
-            return null;
-        }
-
-        taskConstraint.setValue(new ValueConstraint(false,value));
-        constraint.setConstraint(taskConstraint);
-        constraints.add(constraint);
-        return constraints;
-    }
-
-    private  Set<Constraint> getConstraints(String jobName){
-        Set<Constraint> constraints = new HashSet<Constraint>();
-        Constraint constraint = new Constraint();
-        TaskConstraint taskConstraint = new TaskConstraint();
-        HashSet<String> value = new HashSet<String>();
-        constraint.setName("rack");
-
-        if(jobName.contains("mpp")) {
-            value.add("mpp");
-        }else if(jobName.contains("occ")){
-            value.add("occ");
         }else{
             return null;
         }
