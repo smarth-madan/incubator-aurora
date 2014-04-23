@@ -382,10 +382,12 @@ function refreshData(){
          var cell2 = row.insertCell(1);
          var cell3 = row.insertCell(2);
          var cell4 = row.insertCell(3);
+         var cell5 = row.insertCell(4);
          cell1.innerHTML = res.key;
          cell2.innerHTML = res.value.jobname;
          cell3.innerHTML = "<a href="+res.value.joburl+" target=\"_blank\">"+res.value  .joburl+"</a>";
          cell4.innerHTML = res.value.created;
+         cell5.innerHTML = "<span class=\"glyphicon glyphicon-remove\" type=\"button\"></span>";
          res.continue();
      }
  }
