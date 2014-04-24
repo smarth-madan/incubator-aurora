@@ -1,4 +1,4 @@
-package org.apache.aurora.client;
+package org.apache.aurora.client.thriftClient;
 
 import org.apache.aurora.client.entity.JobConfig;
 import org.apache.aurora.gen.*;
@@ -13,8 +13,6 @@ import org.apache.thrift.transport.TTransport;
 
 import java.util.HashSet;
 import java.util.Set;
-
-import static org.apache.aurora.gen.apiConstants.DEFAULT_ENVIRONMENT;
 
 /**
  * Created by smadan on 3/27/14.
