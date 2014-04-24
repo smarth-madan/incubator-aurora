@@ -15,3 +15,5 @@ dist/
 gradle-app.setting
 out/
 third_party/
+.idea/
+3rdparty/
