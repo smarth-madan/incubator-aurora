@@ -105,57 +105,6 @@ function flatten(obj) {
     return result;
 }
 
-//var callCreateJob = function () {
-//    var aSchedulerAddr = $("#aSchedulerAddr").val();
-////    var aSchedulerPort = $("#aSchedulerPort").val();
-//		var aSchedulerPort = '8082';
-//    var jobName = $("#jobName").val();
-//    var environment = $("#environment").val();
-//    var cpu = $("#cpu").val();
-//    var ram = $("#ram").val();
-//    var disk = $("#disk").val();
-//    //    var execConfig = $("#execConfig").val();
-//		var execConfig = getExecConfig();
-//		if (!execConfig && execConfig.length == 0) {
-//			alert('There is no command to process');
-//			return;
-//		}
-//    var create_job_url = API_URL + "/createjob?aSchedulerAddr=" + aSchedulerAddr + "&aSchedulerPort=" + aSchedulerPort + "&" +
-//        "jobName=" + jobName + "&environment=" + environment + "&cpu=" + cpu + "&ram=" + ram + "&disk=" + disk + "&execConfig=" + execConfig;
-//
-//    $.ajax({
-//        url: create_job_url,
-//        method: "POST",
-//        success: function (data) {
-//            $("#result").text(data);
-//            var link="http://"+aSchedulerAddr+":8081/scheduler/knagireddy/"+environment+"/"+jobName;
-//            $("#linkToJob").html("<a href="+link+" target=\"_blank\">"+link+"</a>");
-//            addJobs('knagireddy',jobName, link);
-//            $("#example").modal("toggle");
-//            var jobTbl = $("#jobtblbody")[0];
-//            var row = jobTbl.insertRow(-1);
-//            var cell1 = row.insertCell(0);
-//            var cell2 = row.insertCell(1);
-//            var cell3 = row.insertCell(2);
-//            var cell4 = row.insertCell(3);
-//            cell2.innerHTML = jobName;
-//            cell3.innerHTML = "<a href="+link+" target=\"_blank\">"+link+"</a>";
-//            cell4.innerHTML = new Date();
-//
-//        },
-//        error: function (chr, data, error) {
-//            attDailyJson = data;
-//        },
-//        complete: function (xhr, textStatus) {
-//            attDailyJson = textStatus;
-//        }
-//    }).done(function (data, textStatus, xhr) {
-//        if (console && console.log) {
-//            console.log("Sample of data:", data);
-//        }
-//    });
-//}
-
 var callCreateJob = function (formId) {
     var create_job_url = API_URL + "/createjob";
 
@@ -388,11 +337,86 @@ function refreshData(){
          cell3.innerHTML = "<a href="+res.value.joburl+" target=\"_blank\">"+res.value  .joburl+"</a>";
          cell4.innerHTML = res.value.created;
          cell5.innerHTML = "<span class=\"glyphicon glyphicon-remove\" type=\"button\"></span>";
+         $(cell5).data("username",res.value.username);
+         $(cell5).data("jobName",res.value.jobname);
+         $(cell5).data("scheduler",res.value.scheduler);
+         $(cell5).data("port",res.value.port);
+         $(cell5).data("environment",res.value.environment);
+         $(cell5).addClass("killJob");
          res.continue();
+         $( ".killJob" ).unbind();
+         $(".killJob").click(function(e){
+              var jobName = $(e.target.parentNode).data("jobName");
+              BootstrapDialog.confirm('Are you sure you want to kill job : ' + jobName + " ?",function(result){
+                if(result) {
+                    killJob($(e.target.parentNode).data("scheduler"),$(e.target.parentNode).data("port"),
+                    $(e.target.parentNode).data("jobName"),$(e.target.parentNode).data("environment"),$(e.target.parentNode).data("username"));
+                }
+              });
+          });
      }
  }
-
 }
+
+var killJob = function (aSchedulerAddr,aSchedulerPort,jobName,environment,role) {
+     var sendData = {
+                aSchedulerAddr: aSchedulerAddr,
+                aSchedulerPort: aSchedulerPort,
+                jobName: jobName,
+                environment: environment,
+                role: role
+            }
+    var kill_job_url = API_URL + "/killjob"
+    $.ajax({
+        url: kill_job_url,
+        method: "POST",
+        dataType: "json",
+        headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            },
+        data:JSON.stringify(sendData),
+        contentType:"application/json",
+        success: function (data) {
+            $("#killJobResult").text(data.status).show().fadeOut(2500);
+        },
+        error: function (chr, data, error) {
+            //attDailyJson = data;
+        },
+        complete: function (xhr, textStatus) {
+            //attDailyJson = textStatus;
+        }
+    }).done(function (data, textStatus, xhr) {
+        if (console && console.log) {
+            console.log("Sample of data:", data);
+        }
+    });
+}
+
+BootstrapDialog.confirm = function(message, callback) {
+            new BootstrapDialog({
+                title: '<h3 class="modal-title">Confirmation</h3>',
+                message: '<p class="text-danger">'+message+'</p>',
+                closable: false,
+                data: {
+                    'callback': callback
+                },
+                buttons: [{
+                        label: 'Cancel',
+                        action: function(dialog) {
+                            typeof dialog.getData('callback') === 'function' && dialog.getData('callback')(false);
+                            dialog.close();
+                        }
+                    }, {
+                        label: 'Yes',
+                        cssClass: 'btn-primary',
+                        action: function(dialog) {
+                            typeof dialog.getData('callback') === 'function' && dialog.getData('callback')(true);
+                            dialog.close();
+                        }
+                    }]
+            }).open();
+        };
 
 function addJobs(username, jobName, environment,scheduler,port, jobUrl, sendData) {
 
