@@ -326,10 +326,10 @@ function refreshData(){
   var objectStore = transaction.objectStore("jobData");
 
  var cursor = objectStore.openCursor();
+ $("#jobtblbody >tr").remove();
 
  cursor.onsuccess = function(e) {
      var res = e.target.result;
-     $("#jobtblbody >tr").remove();
      if(res) {
          console.log("Key", res.key);
          console.dir("Data", res.value);
