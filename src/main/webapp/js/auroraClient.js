@@ -136,9 +136,11 @@ var callCreateJob = function (formId) {
             var cell2 = row.insertCell(1);
             var cell3 = row.insertCell(2);
             var cell4 = row.insertCell(3);
-            cell2.innerHTML = jobName;
+            cell2.innerHTML = sendData.jobName;
             cell3.innerHTML = "<a href="+link+" target=\"_blank\">"+link+"</a>";
             cell4.innerHTML = new Date();
+            $("#advancedmodal").modal('hide');
+            $("#simplemodal").modal('hide');
             return;
         },
         error: function (chr, data, error) {
@@ -225,6 +227,11 @@ $(function () {
   var context = {
     color: "blue"
   };
+
+  $("input[href*=advancedmodal]").click(function(e){
+          $('#jobtab li a[href="#process"]').tab("show");
+  });
+
   $("#pNext").click(function(e) {
                e.preventDefault();
                getProcesses();
@@ -322,6 +329,7 @@ function refreshData(){
 
  cursor.onsuccess = function(e) {
      var res = e.target.result;
+     $("#jobtblbody >tr").remove();
      if(res) {
          console.log("Key", res.key);
          console.dir("Data", res.value);
@@ -448,6 +456,7 @@ function addJobs(username, jobName, environment,scheduler,port, jobUrl, sendData
 
     request.onsuccess = function(e,job) {
         console.log("Woot! Did it");
+        refreshData();
     }
 }
 
