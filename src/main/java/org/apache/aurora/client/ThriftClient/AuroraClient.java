@@ -134,7 +134,7 @@ public class AuroraClient{
                 .setConstraints(getConstraints(jobConfig));
     }
 
-    private  Set<Constraint> getConstraints(JobConfig jobConfig){
+    private  Set<Constraint> getConstraints(JobConfig jobConfig) {
         Set<Constraint> constraints = new HashSet<Constraint>();
         Constraint constraint = new Constraint();
         TaskConstraint taskConstraint = new TaskConstraint();
@@ -146,7 +146,7 @@ public class AuroraClient{
             return null;
         }
 
-        taskConstraint.setValue(new ValueConstraint(false,value));
+        taskConstraint.setValue(new ValueConstraint(false, value));
         constraint.setConstraint(taskConstraint);
         constraints.add(constraint);
         return constraints;

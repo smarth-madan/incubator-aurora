@@ -47,8 +47,8 @@ package org.apache.aurora.client.main;
  */
 public class Main extends AbstractApplication {
     @NotNull
-    @CmdLine(name = "ping_target", help = "Host to ping after starting up.")
-    private static final Arg<InetSocketAddress> PING_TARGET = Arg.create();
+//    @CmdLine(name = "ping_target", help = "Host to ping after starting up.")
+//    private static final Arg<InetSocketAddress> PING_TARGET = Arg.create();
 
     @Inject private Lifecycle lifecycle;
 
@@ -65,13 +65,13 @@ public class Main extends AbstractApplication {
                 new StatsModule(),
                 new AbstractModule() {
                     @Override protected void configure() {
-                        bind(new TypeLiteral<Closure<String>>() { }).toInstance(
-                                new Closure<String>() {
-                                    private final Client http = Client.create();
-                                    @Override public void execute(String path) {
-                                        http.asyncResource("http://" + PING_TARGET.get() + path).get(String.class);
-                                    }
-                                });
+//                        bind(new TypeLiteral<Closure<String>>() { }).toInstance(
+//                                new Closure<String>() {
+//                                    private final Client http = Client.create();
+//                                    @Override public void execute(String path) {
+//                                        http.asyncResource("http://" + PING_TARGET.get() + path).get(String.class);
+//                                    }
+//                                });
 
                         install(new JerseyServletModule() {
                             @Override protected void configureServlets() {

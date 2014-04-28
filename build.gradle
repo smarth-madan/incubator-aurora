@@ -154,6 +154,7 @@ dependencies {
   compile "com.sun.jersey:jersey-core:${jerseyRev}"
   compile "com.sun.jersey:jersey-json:${jerseyRev}"
   compile "com.sun.jersey:jersey-server:${jerseyRev}"
+  compile "com.sun.jersey:jersey-client:1.18.1"
   compile "com.sun.jersey:jersey-servlet:${jerseyRev}"
   compile "com.sun.jersey.contribs:jersey-spring:${jerseyRev}"
   compile "com.sun.jersey.contribs:jersey-guice:${jerseyRev}"
@@ -376,4 +377,9 @@ task FlagSchemaChanges(type: Test) {
     executable = 'bash'
     args = ['src/test/sh/org/apache/aurora/verify_thrift_checksum.sh']
   }
+}
+
+task( main, dependsOn: 'classes', type: JavaExec ) {
+    main = 'org.apache.aurora.client.main.Main'
+    classpath += sourceSets.generated.output
 }

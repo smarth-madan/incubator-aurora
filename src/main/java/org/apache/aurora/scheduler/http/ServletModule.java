@@ -39,6 +39,7 @@ import com.twitter.common.net.pool.DynamicHostSet;
 import com.twitter.common.net.pool.DynamicHostSet.MonitorException;
 import com.twitter.thrift.ServiceInstance;
 
+import org.apache.aurora.client.rest.AuroraClientWebApp;
 import org.apache.aurora.scheduler.quota.QuotaManager;
 import org.apache.aurora.scheduler.state.CronJobManager;
 import org.apache.aurora.scheduler.state.SchedulerCore;
@@ -83,6 +84,7 @@ public class ServletModule extends AbstractModule {
       protected void configureServlets() {
         bind(HttpStatsFilter.class).in(Singleton.class);
         filter("/scheduler*").through(HttpStatsFilter.class);
+        filter("/auroraclient*").through(HttpStatsFilter.class);
         bind(LeaderRedirectFilter.class).in(Singleton.class);
         // Servlets may assign a special meaning to trailing /, but this confuses AngularJS's
         // resource loader. So, removing them for /scheduler* URLs using a UIRedirectFilter.
@@ -101,6 +103,7 @@ public class ServletModule extends AbstractModule {
         registerJerseyEndpoint("/slaves", Slaves.class);
         registerJerseyEndpoint("/structdump", StructDump.class);
         registerJerseyEndpoint("/utilization", Utilization.class);
+        registerJerseyEndpoint("/auroraclient", AuroraClientWebApp.class);
       }
     });
 

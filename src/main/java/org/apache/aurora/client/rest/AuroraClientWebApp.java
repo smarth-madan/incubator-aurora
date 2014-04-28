@@ -1,3 +1,18 @@
+/**
+ * Copyright 2013 Apache Software Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.apache.aurora.client.rest;
 
 import javax.servlet.http.HttpServletRequest;
@@ -30,12 +45,12 @@ public class AuroraClientWebApp {
     @VisibleForTesting
     static final int DEFAULT_TTL = 60;
 
-    private final Closure<String> client;
+//    private final Closure<String> client;
 
-    @Inject
-    AuroraClientWebApp(Closure<String> client) {
-        this.client = Preconditions.checkNotNull(client);
-    }
+//    @Inject
+//    AuroraClientWebApp(Closure<String> client) {
+//        this.client = Preconditions.checkNotNull(client);
+//    }
 //    @POST()
 //    @Path("/createjob")
 //    public String createJob(@QueryParam("aSchedulerAddr") String aSchedulerAddr,
@@ -103,10 +118,11 @@ public class AuroraClientWebApp {
             @PathParam("message") final String message,
             @PathParam("ttl") int ttl) {
 
+        System.out.println("Got ping, ttl=" + ttl);
         LOG.info("Got ping, ttl=" + ttl);
         PINGS.incrementAndGet();
         if (ttl > 1) {
-            client.execute("/ping/" + message + "/" + (ttl - 1));
+            //client.execute("/ping/" + message + "/" + (ttl - 1));
         }
         return "pong\n";
     }
