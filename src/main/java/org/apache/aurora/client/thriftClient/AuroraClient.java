@@ -1,4 +1,4 @@
-package org.apache.aurora.client;
+package org.apache.aurora.client.thriftClient;
 
 import org.apache.aurora.client.entity.JobConfig;
 import org.apache.aurora.gen.*;
@@ -11,8 +11,7 @@ import org.apache.thrift.protocol.TProtocol;
 import org.apache.thrift.transport.TSocket;
 import org.apache.thrift.transport.TTransport;
 
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
 
 import static org.apache.aurora.gen.apiConstants.DEFAULT_ENVIRONMENT;
 
@@ -87,6 +86,26 @@ public class AuroraClient{
         }
     }
 
+    public String getStatus(JobConfig jobConfig){
+        try {
+             IJobKey jobKey= JobKeys.from(jobConfig.getRole(), jobConfig.getEnvironment(), jobConfig.getJobName());
+             TaskQuery taskQuery = new TaskQuery();
+             taskQuery.setJobName(jobConfig.getJobName());
+             taskQuery.setEnvironment(jobConfig.getEnvironment());
+             Set<JobKey> jobKeys = new HashSet<JobKey>();
+             taskQuery.setOwner(new Identity(jobConfig.getRole(),jobConfig.getRole()));
+             //jobKeys.add(jobKey.newBuilder());
+             taskQuery.setJobKeys(jobKeys);
+             Response res =  client.getTasksStatus(taskQuery);
+             List<ScheduledTask> tasks = res.getResult().getScheduleStatusResult().getTasks();
+             ScheduledTask lastTask = tasks.get(tasks.size()-1);
+             return lastTask.getStatus().toString();
+        } catch (TException x) {
+            x.printStackTrace();
+            return x.getMessage();
+        }
+    }
+
     public JobConfiguration makeJob(TaskConfig taskConfig,IJobKey jobKey, JobConfig jobConfig ){
         return new JobConfiguration()
                 .setOwner(new Identity(jobConfig.getRole(), jobConfig.getRole()))
@@ -94,32 +113,6 @@ public class AuroraClient{
                 .setTaskConfig(taskConfig)
                 .setKey(jobKey.newBuilder());
     }
-
-//    private TaskConfig defaultTask(boolean production) {
-//
-//        Set<Constraint> constraints = new HashSet<Constraint>();
-//        Constraint constraint = new Constraint();
-//        TaskConstraint taskConstraint = new TaskConstraint();
-//        HashSet<String> value = new HashSet<String>();
-//        value.add("a") ;
-//        taskConstraint.setValue(new ValueConstraint(false,value));
-//        constraint.setName("rack");
-//        constraint.setConstraint(taskConstraint);
-//        constraints.add(constraint);
-//
-//        String task= "{\"priority\": 0, \"task\": {\"processes\": [{\"daemon\": false, \"name\": \"hello\", \"ephemeral\": false, \"max_failures\": 1, \"min_duration\": 5, \"cmdline\": \"\\n    while true; do\\n      echo hello world\\n      sleep 10\\n    done\\n  \", \"final\": false}], \"name\": \"hello\", \"finalization_wait\": 30, \"max_failures\": 1, \"max_concurrency\": 0, \"resources\": {\"disk\": 134217728, \"ram\": 134217728, \"cpu\": 1.0}, \"constraints\": [{\"order\": [\"hello\"]}]}, \"name\": \"hello\", \"environment\": \"prod\", \"max_task_failures\": 1, \"enable_hooks\": false, \"cluster\": \"example\", \"production\": true, \"role\": \"knagireddy\"}";
-//        return new TaskConfig()
-//                .setOwner(new Identity(ROLE, USER))
-//                .setEnvironment("prod")
-//                .setJobName(JOB_NAME)
-//                .setContactEmail("smadan@paypal.com")
-//                .setExecutorConfig(new ExecutorConfig("AuroraExecutor",task))
-//                .setNumCpus(1)
-//                .setRamMb(10)
-//                .setDiskMb(10)
-//                .setProduction(production)
-//                .setConstraints(constraints);
-//    }
 
     public TaskConfig makeTask(JobConfig jobConfig){
         String task= jobConfig.getExecConfig();
