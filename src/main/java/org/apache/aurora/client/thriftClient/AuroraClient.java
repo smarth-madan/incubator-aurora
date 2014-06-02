@@ -53,8 +53,12 @@ public class AuroraClient{
             IJobKey jobKey= JobKeys.from(jobConfig.getRole(), jobConfig.getEnvironment(), jobConfig.getJobName());
             Set<JobKey> jobKeys = new HashSet<JobKey>();
             jobKeys.add(jobKey.newBuilder());
-            Response res = client.killTasks(new TaskQuery().setJobKeys(jobKeys),null,SESSION);
-            System.out.println(res.getMessage());
+            TaskQuery taskQuery = new TaskQuery();
+            taskQuery.setJobName(jobConfig.getJobName());
+            taskQuery.setEnvironment(jobConfig.getEnvironment());
+            taskQuery.setOwner(new Identity(jobConfig.getRole(),jobConfig.getRole()));
+            Response res = client.killTasks(taskQuery,null,SESSION);
+            System.out.println(res.toString());
             return res.getMessage();
         } catch (TException e) {
             e.printStackTrace();
