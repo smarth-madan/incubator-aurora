@@ -18,10 +18,10 @@ The UI can be accessed at : http://<HOSTNAME>:8080/incubator-aurora/pages/home.h
 The jobs scheduled are stored in the browser's indexedDB, hence everytime you use a different browser or delete all the browser data, all previous jobs listed on the home page will get removed. If you do not wish to use the web UI, you could also use the REST interface to schedule jobs. Following are the interface with sample payloads :
 
 1. Create Job:
-    URL : http://localhost:8080/incubator-aurora/rest/auroraclient/createjob
-    method : POST
-    Header : "Content-Type:application/json"
-    Sample Payload(JSON) :
+    * URL : http://localhost:8080/incubator-aurora/rest/auroraclient/createjob
+    * method : POST
+    * Header : "Content-Type:application/json"
+    * Sample Payload(JSON) :
         {
           "aSchedulerAddr":"192.168.33.7",
           "aSchedulerPort":"8082",
@@ -36,7 +36,7 @@ The jobs scheduled are stored in the browser's indexedDB, hence everytime you us
           "role":"vagrant"
         }
     
-    Sample Response :
+    * Sample Response :
         {
             "code": 0,
             "status": "1 new tasks pending for job smadan/devel/job_test1",
@@ -44,9 +44,9 @@ The jobs scheduled are stored in the browser's indexedDB, hence everytime you us
         }
 
 2. Kill Job:
-    URL : http://localhost:8080/incubator-aurora/rest/auroraclient/killjob
-    method : POST
-    Sample payload : 
+    * URL : http://localhost:8080/incubator-aurora/rest/auroraclient/killjob
+    * method : POST
+    * Sample payload : 
         {
           "aSchedulerAddr":"stage2p1137.qa.paypal.com",
           "aSchedulerPort":"8082",
@@ -55,7 +55,7 @@ The jobs scheduled are stored in the browser's indexedDB, hence everytime you us
           "role":"root"
         }
     
-    Sample Response : 
+    * Sample Response : 
         {
             "code": 0,
             "status": "No tasks found for query: TaskQuery(owner:Identity(role:smadan, user:smadan), environment:staging, jobName:_occ, taskIds:null, statuses:null, slaveHost:null, instanceIds:null)",
