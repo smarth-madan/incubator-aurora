@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -18,10 +16,12 @@ package org.apache.aurora.scheduler.thrift.aop;
 import java.util.Set;
 
 import org.apache.aurora.gen.AddInstancesConfig;
-import org.apache.aurora.gen.AuroraAdmin;
 import org.apache.aurora.gen.Hosts;
 import org.apache.aurora.gen.JobConfiguration;
 import org.apache.aurora.gen.JobKey;
+import org.apache.aurora.gen.JobUpdateKey;
+import org.apache.aurora.gen.JobUpdateQuery;
+import org.apache.aurora.gen.JobUpdateRequest;
 import org.apache.aurora.gen.Lock;
 import org.apache.aurora.gen.LockKey;
 import org.apache.aurora.gen.LockValidation;
@@ -33,18 +33,18 @@ import org.apache.aurora.gen.SessionKey;
 import org.apache.aurora.gen.TaskQuery;
 import org.apache.thrift.TException;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
 
 /**
  * A forwarding scheduler controller to make it easy to override specific behavior in an
  * implementation class.
  */
-abstract class ForwardingThrift implements AuroraAdmin.Iface {
+abstract class ForwardingThrift implements AnnotatedAuroraAdmin {
 
-  private final AuroraAdmin.Iface delegate;
+  private final AnnotatedAuroraAdmin delegate;
 
-  ForwardingThrift(AuroraAdmin.Iface delegate) {
-    this.delegate = checkNotNull(delegate);
+  ForwardingThrift(AnnotatedAuroraAdmin delegate) {
+    this.delegate = requireNonNull(delegate);
   }
 
   @Override
@@ -117,10 +117,27 @@ abstract class ForwardingThrift implements AuroraAdmin.Iface {
   }
 
   @Override
+  public Response getConfigSummary(JobKey key) throws TException {
+    return delegate.getConfigSummary(key);
+  }
+
+  @Override
   public Response createJob(JobConfiguration description, Lock lock, SessionKey session)
       throws TException {
 
     return delegate.createJob(description, lock, session);
+  }
+
+  @Override
+  public Response scheduleCronJob(JobConfiguration description, Lock lock, SessionKey session)
+      throws TException {
+
+    return delegate.scheduleCronJob(description, lock, session);
+  }
+
+  @Override
+  public Response descheduleCronJob(JobKey job, Lock lock, SessionKey session) throws TException {
+    return delegate.descheduleCronJob(job, lock, session);
   }
 
   @Override
@@ -152,6 +169,11 @@ abstract class ForwardingThrift implements AuroraAdmin.Iface {
 
   @Override
   public Response getTasksStatus(TaskQuery query) throws TException {
+    return delegate.getTasksStatus(query);
+  }
+
+  @Override
+  public Response getTasksWithoutConfigs(TaskQuery query) throws TException {
     return delegate.getTasksStatus(query);
   }
 
@@ -207,11 +229,6 @@ abstract class ForwardingThrift implements AuroraAdmin.Iface {
   }
 
   @Override
-  public Response getVersion() throws TException {
-    return delegate.getVersion();
-  }
-
-  @Override
   public Response acquireLock(LockKey lockKey, SessionKey session) throws TException {
     return delegate.acquireLock(lockKey, session);
   }
@@ -224,11 +241,64 @@ abstract class ForwardingThrift implements AuroraAdmin.Iface {
   }
 
   @Override
+  public Response getLocks() throws TException {
+    return delegate.getLocks();
+  }
+
+  @Override
   public Response addInstances(
       AddInstancesConfig config,
       Lock lock,
       SessionKey session) throws TException {
 
     return delegate.addInstances(config, lock, session);
+  }
+
+  @Override
+  public Response getPendingReason(TaskQuery query) throws TException {
+    return delegate.getPendingReason(query);
+  }
+
+  @Override
+  public Response startJobUpdate(JobUpdateRequest request, String message, SessionKey session)
+      throws TException {
+
+    return delegate.startJobUpdate(request, message, session);
+  }
+
+  @Override
+  public Response pauseJobUpdate(JobUpdateKey key, String message, SessionKey session)
+      throws TException {
+
+    return delegate.pauseJobUpdate(key, message, session);
+  }
+
+  @Override
+  public Response resumeJobUpdate(JobUpdateKey key, String message, SessionKey session)
+      throws TException {
+
+    return delegate.resumeJobUpdate(key, message, session);
+  }
+
+  @Override
+  public Response abortJobUpdate(JobUpdateKey key, String message, SessionKey session)
+      throws TException {
+
+    return delegate.abortJobUpdate(key, message, session);
+  }
+
+  @Override
+  public Response pulseJobUpdate(JobUpdateKey key, SessionKey session) throws TException {
+    return delegate.pulseJobUpdate(key, session);
+  }
+
+  @Override
+  public Response getJobUpdateSummaries(JobUpdateQuery updateQuery) throws TException {
+    return delegate.getJobUpdateSummaries(updateQuery);
+  }
+
+  @Override
+  public Response getJobUpdateDetails(JobUpdateKey key) throws TException {
+    return delegate.getJobUpdateDetails(key);
   }
 }

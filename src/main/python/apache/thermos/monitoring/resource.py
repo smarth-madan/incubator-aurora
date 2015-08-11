@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -29,24 +27,23 @@ disk consumption and retaining a limited (FIFO) in-memory history of this data.
 
 """
 
+import threading
+import time
 from abc import abstractmethod
 from bisect import bisect_left
 from collections import namedtuple
 from operator import attrgetter
-import platform
-import threading
-import time
-
-from .disk import DiskCollector
-from .monitor import TaskMonitor
-from .process import ProcessSample
-from .process_collector_psutil import ProcessTreeCollector
 
 from twitter.common import log
 from twitter.common.collections import RingBuffer
 from twitter.common.concurrent import EventMuxer
+from twitter.common.exceptions import ExceptionalThread
 from twitter.common.lang import Interface
 from twitter.common.quantity import Amount, Time
+
+from .disk import DiskCollector
+from .process import ProcessSample
+from .process_collector_psutil import ProcessTreeCollector
 
 
 class ResourceMonitorBase(Interface):
@@ -83,6 +80,7 @@ class ResourceHistory(object):
   """Simple class to contain a RingBuffer (fixed-length FIFO) history of resource samples, with the
        mapping: timestamp => (number_of_procs, ProcessSample, disk_usage_in_bytes)
   """
+
   def __init__(self, maxlen, initialize=True):
     if not maxlen >= 1:
       raise ValueError("maxlen must be greater than 0")
@@ -112,17 +110,20 @@ class ResourceHistory(object):
     return 'ResourceHistory(%s)' % ', '.join([str(r) for r in self._values])
 
 
-class TaskResourceMonitor(ResourceMonitorBase, threading.Thread):
+class TaskResourceMonitor(ResourceMonitorBase, ExceptionalThread):
   """ Lightweight thread to aggregate resource consumption for a task's constituent processes.
       Actual resource calculation is delegated to collectors; this class periodically polls the
       collectors and aggregates into a representation for the entire task. Also maintains a limited
       history of previous sample results.
   """
 
-  MAX_HISTORY = 10000 # magic number
+  MAX_HISTORY = 10000  # magic number
 
-  def __init__(self, task_monitor, sandbox,
-               process_collector=ProcessTreeCollector, disk_collector=DiskCollector,
+  def __init__(self,
+               task_id,
+               task_monitor,
+               process_collector=ProcessTreeCollector,
+               disk_collector=DiskCollector,
                process_collection_interval=Amount(20, Time.SECONDS),
                disk_collection_interval=Amount(1, Time.MINUTES),
                history_time=Amount(1, Time.HOURS)):
@@ -130,15 +131,13 @@ class TaskResourceMonitor(ResourceMonitorBase, threading.Thread):
       task_monitor: TaskMonitor object specifying the task whose resources should be monitored
       sandbox: Directory for which to monitor disk utilisation
     """
-    self._task_monitor = task_monitor # exposes PIDs, sandbox
-    self._task_id = task_monitor._task_id
+    self._task_monitor = task_monitor  # exposes PIDs, sandbox
+    self._task_id = task_id
     log.debug('Initialising resource collection for task %s' % self._task_id)
-    self._process_collectors = dict() # ProcessStatus => ProcessTreeCollector
-    # TODO(jon): sandbox is also available through task_monitor, but typically the first checkpoint
-    # isn't written (and hence the header is not available) by the time we initialise here
-    self._sandbox = sandbox
+    self._process_collectors = dict()  # ProcessStatus => ProcessTreeCollector
     self._process_collector_factory = process_collector
-    self._disk_collector = disk_collector(self._sandbox)
+    self._disk_collector_class = disk_collector
+    self._disk_collector = None
     self._process_collection_interval = process_collection_interval.as_(Time.SECONDS)
     self._disk_collection_interval = disk_collection_interval.as_(Time.SECONDS)
     min_collection_interval = min(self._process_collection_interval, self._disk_collection_interval)
@@ -148,7 +147,7 @@ class TaskResourceMonitor(ResourceMonitorBase, threading.Thread):
     log.debug("Initialising ResourceHistory of length %s" % history_length)
     self._history = ResourceHistory(history_length)
     self._kill_signal = threading.Event()
-    threading.Thread.__init__(self)
+    ExceptionalThread.__init__(self, name='%s[%s]' % (self.__class__.__name__, task_id))
     self.daemon = True
 
   def sample(self):
@@ -198,30 +197,29 @@ class TaskResourceMonitor(ResourceMonitorBase, threading.Thread):
         actives = set(self._get_active_processes())
         current = set(self._process_collectors)
         for process in current - actives:
-          log.debug('Process "%s" (pid %s) no longer active, removing from monitored processes' %
-                   (process.process, process.pid))
           self._process_collectors.pop(process)
         for process in actives - current:
-          log.debug('Adding process "%s" (pid %s) to resource monitoring' %
-                   (process.process, process.pid))
           self._process_collectors[process] = self._process_collector_factory(process.pid)
-        for process, collector in self._process_collectors.iteritems():
-          log.debug('Collecting sample for process "%s" (pid %s) and children' %
-                   (process.process, process.pid))
+        for process, collector in self._process_collectors.items():
           collector.sample()
 
       if now > next_disk_collection:
         next_disk_collection = now + self._disk_collection_interval
-        log.debug('Collecting disk sample for %s' % self._sandbox)
-        self._disk_collector.sample()
+        if not self._disk_collector:
+          sandbox = self._task_monitor.get_sandbox()
+          if sandbox:
+            self._disk_collector = self._disk_collector_class(sandbox)
+        if self._disk_collector:
+          self._disk_collector.sample()
+        else:
+          log.debug('No sandbox detected yet for %s' % self._task_id)
 
       try:
         aggregated_procs = sum(map(attrgetter('procs'), self._process_collectors.values()))
         aggregated_sample = sum(map(attrgetter('value'), self._process_collectors.values()),
                                 ProcessSample.empty())
-        self._history.add(now, self.ResourceResult(aggregated_procs, aggregated_sample,
-                                                   self._disk_collector.value))
-        log.debug("Recorded resource sample at %s" % now)
+        disk_value = self._disk_collector.value if self._disk_collector else 0
+        self._history.add(now, self.ResourceResult(aggregated_procs, aggregated_sample, disk_value))
       except ValueError as err:
         log.warning("Error recording resource sample: %s" % err)
 
@@ -232,7 +230,12 @@ class TaskResourceMonitor(ResourceMonitorBase, threading.Thread):
       # - the TaskResourceMonitor has been killed via self._kill_signal
       now = time.time()
       next_collection = min(next_process_collection - now, next_disk_collection - now)
-      EventMuxer(self._kill_signal, self._disk_collector.completed_event
-                ).wait(timeout=max(0, next_collection))
+
+      if self._disk_collector:
+        waiter = EventMuxer(self._kill_signal, self._disk_collector.completed_event)
+      else:
+        waiter = self._kill_signal
+
+      waiter.wait(timeout=max(0, next_collection))
 
     log.debug('Stopping resource monitoring for task "%s"' % self._task_id)

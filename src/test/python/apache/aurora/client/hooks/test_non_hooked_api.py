@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -17,9 +15,8 @@
 import functools
 import unittest
 
-from apache.aurora.common.aurora_job_key import AuroraJobKey
 from apache.aurora.client.hooks.hooked_api import NonHookedAuroraClientAPI
-
+from apache.aurora.common.aurora_job_key import AuroraJobKey
 
 API_METHODS = ('cancel_update', 'create_job', 'kill_job', 'restart', 'start_cronjob', 'update_job')
 API_METHODS_WITH_CONFIG_PARAM_ADDED = ('cancel_update', 'kill_job', 'restart', 'start_cronjob')

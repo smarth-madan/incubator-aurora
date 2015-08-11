@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,52 +14,32 @@
 
 import os
 
-python_library(
-  name = 'observed_task',
-  sources = ['observed_task.py'],
-  dependencies = [
-    pants('3rdparty/python:pystachio'),
-    pants('3rdparty/python:twitter.common.lang'),
-    pants('3rdparty/python:twitter.common.log'),
-    pants('src/main/python/apache/thermos/common:ckpt'),
-    pants('src/main/python/apache/thermos/config'),
-  ]
-)
-
-python_library(
-  name = 'task_observer',
-  sources = ['task_observer.py'],
-  dependencies = [
-    pants(':observed_task'),
-    pants('3rdparty/python:twitter.common.exceptions'),
-    pants('3rdparty/python:twitter.common.lang'),
-    pants('3rdparty/python:twitter.common.log'),
-    pants('3rdparty/python:twitter.common.quantity'),
-    pants('src/main/python/apache/thermos/common:path'),
-    pants('src/main/python/apache/thermos/monitoring:detector'),
-    pants('src/main/python/apache/thermos/monitoring:monitor'),
-    pants('src/main/python/apache/thermos/monitoring:process'),
-    pants('src/main/python/apache/thermos/monitoring:resource'),
-    pants('src/main/thrift/org/apache/thermos:py-thrift'),
-  ]
-)
 
 python_library(
   name = 'observer',
+  sources = rglobs('*.py'),
+  resources = zglobs('**/assets/*') + rglobs('*.tpl'),
   dependencies = [
-    pants(':task_observer'),
-    pants('src/main/python/apache/thermos/observer/http:http_observer'),
+    '3rdparty/python:bottle',
+    '3rdparty/python:mako',
+    '3rdparty/python:pex',
+    '3rdparty/python:pystachio',
+    '3rdparty/python:twitter.common.exceptions',
+    '3rdparty/python:twitter.common.http',
+    '3rdparty/python:twitter.common.lang',
+    '3rdparty/python:twitter.common.log',
+    '3rdparty/python:twitter.common.metrics',
+    '3rdparty/python:twitter.common.quantity',
+    'api/src/main/thrift/org/apache/thermos',
 
     # covering libraries
-    pants('src/main/python/apache/thermos/common'),
-    pants('src/main/python/apache/thermos/config'),
-    pants('src/main/python/apache/thermos/monitoring'),
+    'src/main/python/apache/thermos/common',
+    'src/main/python/apache/thermos/config',
+    'src/main/python/apache/thermos/monitoring',
   ],
   provides = setup_py(
     name = 'apache.thermos.observer',
     version = open(os.path.join(get_buildroot(), '.auroraversion')).read().strip().upper(),
-    description = 'The Thermos observer web interface.',
-  ).with_binaries(
-    thermos_observer = pants('src/main/python/apache/thermos/observer/bin:thermos_observer'),
-  )
+    description = 'The Thermos observer web interface libraries.',
+  ),
 )

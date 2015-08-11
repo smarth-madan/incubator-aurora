@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,12 +12,9 @@
 # limitations under the License.
 #
 
-from apache.thermos.config.schema import (
-  Constraint,
-  Process,
-  Task
-)
+from apache.thermos.config.schema import Constraint, Process, Task
 from apache.thermos.testing.runner import RunnerTestBase
+
 from gen.apache.thermos.ttypes import ProcessState, TaskState
 
 
@@ -28,7 +23,7 @@ class TestRegularFinalizingTask(RunnerTestBase):
   def task(cls):
     main = Process(name="main", cmdline="date && echo hello world")
     finalizer = Process(name="finalizer", cmdline="date", final=True)
-    task = Task(name="task_with_finalizer", processes = [main, finalizer])
+    task = Task(name="task_with_finalizer", processes=[main, finalizer])
     return task.interpolate()[0]
 
   def test_runner_state(self):

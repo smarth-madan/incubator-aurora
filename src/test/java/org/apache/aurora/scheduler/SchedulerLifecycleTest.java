@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,78 +14,74 @@
 package org.apache.aurora.scheduler;
 
 import java.lang.Thread.UncaughtExceptionHandler;
+import java.util.concurrent.TimeUnit;
 
 import com.twitter.common.application.Lifecycle;
 import com.twitter.common.application.ShutdownRegistry;
 import com.twitter.common.base.Command;
+import com.twitter.common.base.ExceptionalCommand;
 import com.twitter.common.testing.easymock.EasyMockTest;
-import com.twitter.common.util.Clock;
 import com.twitter.common.zookeeper.SingletonService.LeaderControl;
 import com.twitter.common.zookeeper.SingletonService.LeadershipListener;
 
-import org.apache.aurora.scheduler.Driver.SettableDriver;
+import org.apache.aurora.GuavaUtils.ServiceManagerIface;
 import org.apache.aurora.scheduler.SchedulerLifecycle.DelayedActions;
 import org.apache.aurora.scheduler.events.EventSink;
 import org.apache.aurora.scheduler.events.PubsubEvent.DriverRegistered;
-import org.apache.aurora.scheduler.events.PubsubEvent.SchedulerActive;
-import org.apache.aurora.scheduler.storage.Storage.MutateWork.NoResult.Quiet;
+import org.apache.aurora.scheduler.mesos.Driver;
 import org.apache.aurora.scheduler.storage.Storage.StorageException;
 import org.apache.aurora.scheduler.storage.testing.StorageTestUtil;
-import org.apache.mesos.Protos.Status;
-import org.apache.mesos.SchedulerDriver;
+import org.apache.aurora.scheduler.testing.FakeStatsProvider;
 import org.easymock.Capture;
 import org.easymock.EasyMock;
 import org.junit.Before;
 import org.junit.Test;
 
+import static org.apache.aurora.scheduler.SchedulerLifecycle.State;
+import static org.apache.aurora.scheduler.SchedulerLifecycle.stateGaugeName;
 import static org.easymock.EasyMock.capture;
 import static org.easymock.EasyMock.expect;
 import static org.easymock.EasyMock.expectLastCall;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
 public class SchedulerLifecycleTest extends EasyMockTest {
-
-  private static final String FRAMEWORK_ID = "framework id";
-
-  private DriverFactory driverFactory;
   private StorageTestUtil storageUtil;
   private ShutdownSystem shutdownRegistry;
-  private SettableDriver driver;
+  private Driver driver;
   private LeaderControl leaderControl;
-  private SchedulerDriver schedulerDriver;
   private DelayedActions delayedActions;
   private EventSink eventSink;
+  private FakeStatsProvider statsProvider;
+  private ServiceManagerIface serviceManager;
 
   private SchedulerLifecycle schedulerLifecycle;
 
   @Before
   public void setUp() {
-    driverFactory = createMock(DriverFactory.class);
     storageUtil = new StorageTestUtil(this);
     shutdownRegistry = createMock(ShutdownSystem.class);
-    driver = createMock(SettableDriver.class);
+    driver = createMock(Driver.class);
     leaderControl = createMock(LeaderControl.class);
-    schedulerDriver = createMock(SchedulerDriver.class);
     delayedActions = createMock(DelayedActions.class);
     eventSink = createMock(EventSink.class);
+    statsProvider = new FakeStatsProvider();
+    serviceManager = createMock(ServiceManagerIface.class);
   }
 
   /**
-   * Composite interface to mimick a ShutdownRegistry implementation that can be triggered.
+   * Composite interface to mimic a ShutdownRegistry implementation that can be triggered.
    */
   private interface ShutdownSystem extends ShutdownRegistry, Command {
   }
 
-  private Capture<Command> replayAndCreateLifecycle() {
-    Capture<Command> shutdownCommand = createCapture();
-    shutdownRegistry.addAction(capture(shutdownCommand));
-
-    Clock clock = createMock(Clock.class);
+  private Capture<ExceptionalCommand<?>> replayAndCreateLifecycle() {
+    Capture<ExceptionalCommand<?>> shutdownCommand = createCapture();
+    shutdownRegistry.addAction(EasyMock.<ExceptionalCommand<?>>capture(shutdownCommand));
 
     control.replay();
 
     schedulerLifecycle = new SchedulerLifecycle(
-        driverFactory,
         storageUtil.storage,
         new Lifecycle(shutdownRegistry, new UncaughtExceptionHandler() {
           @Override
@@ -97,35 +91,37 @@ public class SchedulerLifecycleTest extends EasyMockTest {
         }),
         driver,
         delayedActions,
-        clock,
         eventSink,
-        shutdownRegistry);
+        shutdownRegistry,
+        statsProvider,
+        serviceManager);
+    assertEquals(0, statsProvider.getValue(SchedulerLifecycle.REGISTERED_GAUGE));
+    assertEquals(1, statsProvider.getValue(stateGaugeName(State.IDLE)));
     return shutdownCommand;
   }
 
   private void expectLoadStorage() {
-    storageUtil.storage.start(EasyMock.<Quiet>anyObject());
+    storageUtil.storage.start(EasyMock.anyObject());
     storageUtil.expectOperations();
-    expect(storageUtil.schedulerStore.fetchFrameworkId()).andReturn(FRAMEWORK_ID);
   }
 
   private void expectInitializeDriver() {
-    driver.initialize(schedulerDriver);
-    expect(schedulerDriver.start()).andReturn(Status.DRIVER_RUNNING);
-    delayedActions.blockingDriverJoin(EasyMock.<Runnable>anyObject());
+    expect(driver.startAsync()).andReturn(driver);
+    driver.awaitRunning();
+    delayedActions.blockingDriverJoin(EasyMock.anyObject());
   }
 
-  private Capture<Runnable> expectFullStartup() throws Exception {
-    Capture<Runnable> handleRegistered = createCapture();
-    delayedActions.onRegistered(capture(handleRegistered));
+  private void expectFullStartup() throws Exception {
     leaderControl.advertise();
-    eventSink.post(new SchedulerActive());
-    return handleRegistered;
+
+    expect(serviceManager.startAsync()).andReturn(serviceManager);
+    serviceManager.awaitHealthy();
   }
 
   private void expectShutdown() throws Exception {
     leaderControl.leave();
-    driver.stop();
+    expect(driver.stopAsync()).andReturn(driver);
+    driver.awaitTerminated();
     storageUtil.storage.stop();
     shutdownRegistry.execute();
   }
@@ -138,21 +134,24 @@ public class SchedulerLifecycleTest extends EasyMockTest {
 
     storageUtil.storage.prepare();
     expectLoadStorage();
-    expect(driverFactory.apply(FRAMEWORK_ID)).andReturn(schedulerDriver);
     Capture<Runnable> triggerFailover = createCapture();
     delayedActions.onAutoFailover(capture(triggerFailover));
-    delayedActions.onRegistrationTimeout(EasyMock.<Runnable>anyObject());
+    delayedActions.onRegistrationTimeout(EasyMock.anyObject());
     expectInitializeDriver();
 
-    Capture<Runnable> handleRegistered = expectFullStartup();
+    expectFullStartup();
     expectShutdown();
 
     replayAndCreateLifecycle();
 
     LeadershipListener leaderListener = schedulerLifecycle.prepare();
+    assertEquals(1, statsProvider.getValue(stateGaugeName(State.STORAGE_PREPARED)));
     leaderListener.onLeading(leaderControl);
+    assertEquals(1, statsProvider.getValue(stateGaugeName(State.LEADER_AWAITING_REGISTRATION)));
+    assertEquals(0, statsProvider.getValue(SchedulerLifecycle.REGISTERED_GAUGE));
     schedulerLifecycle.registered(new DriverRegistered());
-    handleRegistered.getValue().run();
+    assertEquals(1, statsProvider.getValue(stateGaugeName(State.ACTIVE)));
+    assertEquals(1, statsProvider.getValue(SchedulerLifecycle.REGISTERED_GAUGE));
     triggerFailover.getValue().run();
   }
 
@@ -160,11 +159,11 @@ public class SchedulerLifecycleTest extends EasyMockTest {
   public void testRegistrationTimeout() throws Exception {
     storageUtil.storage.prepare();
     expectLoadStorage();
-    expect(driverFactory.apply(FRAMEWORK_ID)).andReturn(schedulerDriver);
-    delayedActions.onAutoFailover(EasyMock.<Runnable>anyObject());
+    delayedActions.onAutoFailover(EasyMock.anyObject());
     Capture<Runnable> registrationTimeout = createCapture();
     delayedActions.onRegistrationTimeout(capture(registrationTimeout));
-    expect(schedulerDriver.start()).andReturn(Status.DRIVER_RUNNING);
+    expect(driver.startAsync()).andReturn(driver);
+    driver.awaitRunning();
 
     expectShutdown();
 
@@ -179,10 +178,10 @@ public class SchedulerLifecycleTest extends EasyMockTest {
   public void testDefeatedBeforeRegistered() throws Exception {
     storageUtil.storage.prepare();
     expectLoadStorage();
-    expect(driverFactory.apply(FRAMEWORK_ID)).andReturn(schedulerDriver);
-    delayedActions.onAutoFailover(EasyMock.<Runnable>anyObject());
-    delayedActions.onRegistrationTimeout(EasyMock.<Runnable>anyObject());
-    expect(schedulerDriver.start()).andReturn(Status.DRIVER_RUNNING);
+    delayedActions.onAutoFailover(EasyMock.anyObject());
+    delayedActions.onRegistrationTimeout(EasyMock.anyObject());
+    expect(driver.startAsync()).andReturn(driver);
+    driver.awaitRunning();
 
     // Important piece here is what's absent - leader presence is not advertised.
     expectShutdown();
@@ -198,7 +197,7 @@ public class SchedulerLifecycleTest extends EasyMockTest {
   public void testStorageStartFails() throws Exception {
     storageUtil.storage.prepare();
     storageUtil.expectOperations();
-    storageUtil.storage.start(EasyMock.<Quiet>anyObject());
+    storageUtil.storage.start(EasyMock.anyObject());
     expectLastCall().andThrow(new StorageException("Recovery failed."));
     expectShutdown();
 
@@ -218,21 +217,21 @@ public class SchedulerLifecycleTest extends EasyMockTest {
   public void testExternalShutdown() throws Exception {
     storageUtil.storage.prepare();
     expectLoadStorage();
-    expect(driverFactory.apply(FRAMEWORK_ID)).andReturn(schedulerDriver);
     Capture<Runnable> triggerFailover = createCapture();
     delayedActions.onAutoFailover(capture(triggerFailover));
-    delayedActions.onRegistrationTimeout(EasyMock.<Runnable>anyObject());
+    delayedActions.onRegistrationTimeout(EasyMock.anyObject());
     expectInitializeDriver();
 
-    Capture<Runnable> handleRegistered = expectFullStartup();
+    expectFullStartup();
     expectShutdown();
+    expect(serviceManager.stopAsync()).andReturn(serviceManager);
+    serviceManager.awaitStopped(5, TimeUnit.SECONDS);
 
-    Capture<Command> shutdownCommand = replayAndCreateLifecycle();
+    Capture<ExceptionalCommand<?>> shutdownCommand = replayAndCreateLifecycle();
 
     LeadershipListener leaderListener = schedulerLifecycle.prepare();
     leaderListener.onLeading(leaderControl);
     schedulerLifecycle.registered(new DriverRegistered());
-    handleRegistered.getValue().run();
     shutdownCommand.getValue().execute();
   }
 }

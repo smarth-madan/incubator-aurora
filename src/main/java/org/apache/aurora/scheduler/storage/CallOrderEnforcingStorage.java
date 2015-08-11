@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -21,9 +19,9 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 import javax.inject.Inject;
+import javax.inject.Qualifier;
 import javax.inject.Singleton;
 
-import com.google.inject.BindingAnnotation;
 import com.google.inject.Module;
 import com.google.inject.PrivateModule;
 import com.twitter.common.util.StateMachine;
@@ -36,7 +34,7 @@ import org.apache.aurora.scheduler.storage.Storage.MutateWork.NoResult.Quiet;
 import org.apache.aurora.scheduler.storage.Storage.NonVolatileStorage;
 import org.apache.aurora.scheduler.storage.entities.IScheduledTask;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
 
 /**
  * A non-volatile storage wrapper that enforces method call ordering.
@@ -48,7 +46,7 @@ public class CallOrderEnforcingStorage implements NonVolatileStorage {
    */
   @Retention(RetentionPolicy.RUNTIME)
   @Target({ ElementType.PARAMETER, ElementType.METHOD })
-  @BindingAnnotation
+  @Qualifier
   private @interface EnforceOrderOn { }
 
   private final NonVolatileStorage wrapped;
@@ -71,13 +69,13 @@ public class CallOrderEnforcingStorage implements NonVolatileStorage {
 
   @Inject
   CallOrderEnforcingStorage(@EnforceOrderOn NonVolatileStorage wrapped, EventSink eventSink) {
-    this.wrapped = checkNotNull(wrapped);
-    this.eventSink = checkNotNull(eventSink);
+    this.wrapped = requireNonNull(wrapped);
+    this.eventSink = requireNonNull(eventSink);
   }
 
   private void checkInState(State state) throws StorageException {
     if (stateMachine.getState() != state) {
-      throw new StorageException("Storage is not " + state);
+      throw new TransientStorageException("Storage is not " + state);
     }
   }
 
@@ -95,7 +93,7 @@ public class CallOrderEnforcingStorage implements NonVolatileStorage {
     stateMachine.transition(State.READY);
     wrapped.write(new MutateWork.NoResult.Quiet() {
       @Override
-      protected void execute(MutableStoreProvider storeProvider) {
+      public void execute(MutableStoreProvider storeProvider) {
         Iterable<IScheduledTask> tasks = Tasks.LATEST_ACTIVITY.sortedCopy(
             storeProvider.getTaskStore().fetchTasks(Query.unscoped()));
         for (IScheduledTask task : tasks) {
@@ -112,17 +110,17 @@ public class CallOrderEnforcingStorage implements NonVolatileStorage {
   }
 
   @Override
-  public <T, E extends Exception> T consistentRead(Work<T, E> work) throws StorageException, E {
+  public <T, E extends Exception> T read(Work<T, E> work) throws StorageException, E {
     checkInState(State.READY);
-    return wrapped.consistentRead(work);
+    return wrapped.read(work);
   }
 
   @Override
-  public <T, E extends Exception> T weaklyConsistentRead(Work<T, E> work)
+  public <E extends Exception> void bulkLoad(MutateWork.NoResult<E> work)
       throws StorageException, E {
 
-    checkInState(State.READY);
-    return wrapped.weaklyConsistentRead(work);
+    checkInState(State.PREPARED);
+    wrapped.bulkLoad(work);
   }
 
   @Override

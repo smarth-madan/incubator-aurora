@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -27,9 +25,7 @@ import javax.ws.rs.POST;
 import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
 import javax.ws.rs.core.Context;
-import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.Response.Status;
 import javax.ws.rs.core.UriBuilder;
@@ -47,9 +43,9 @@ import org.apache.aurora.scheduler.storage.Storage;
 import org.apache.aurora.scheduler.storage.entities.IAssignedTask;
 import org.apache.aurora.scheduler.storage.entities.IScheduledTask;
 
-import static javax.ws.rs.core.Response.Status.NOT_FOUND;
+import static java.util.Objects.requireNonNull;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static javax.ws.rs.core.Response.Status.NOT_FOUND;
 
 import static org.apache.aurora.gen.ScheduleStatus.RUNNING;
 
@@ -63,17 +59,16 @@ import static org.apache.aurora.gen.ScheduleStatus.RUNNING;
 public class Mname {
 
   private static final Set<String> HTTP_PORT_NAMES = ImmutableSet.of(
-      "health", "http", "HTTP", "web");
+      "health", "http", "HTTP", "web", "admin");
 
   private final Storage storage;
 
   @Inject
   public Mname(Storage storage) {
-    this.storage = checkNotNull(storage);
+    this.storage = requireNonNull(storage);
   }
 
   @GET
-  @Produces(MediaType.TEXT_HTML)
   public Response getUsage() {
     return Response
         .status(Status.BAD_REQUEST)
@@ -83,7 +78,6 @@ public class Mname {
 
   @GET
   @Path("/{role}/{env}/{job}/{instance}/{forward:.+}")
-  @Produces(MediaType.TEXT_HTML)
   public Response getWithForwardRequest(
       @PathParam("role") String role,
       @PathParam("env") String env,
@@ -97,7 +91,6 @@ public class Mname {
 
   @PUT
   @Path("/{role}/{env}/{job}/{instance}/{forward:.+}")
-  @Produces(MediaType.TEXT_HTML)
   public Response putWithForwardRequest(
       @PathParam("role") String role,
       @PathParam("env") String env,
@@ -111,7 +104,6 @@ public class Mname {
 
   @POST
   @Path("/{role}/{env}/{job}/{instance}/{forward:.+}")
-  @Produces(MediaType.TEXT_HTML)
   public Response postWithForwardRequest(
       @PathParam("role") String role,
       @PathParam("env") String env,
@@ -125,7 +117,6 @@ public class Mname {
 
   @DELETE
   @Path("/{role}/{env}/{job}/{instance}/{forward:.+}")
-  @Produces(MediaType.TEXT_HTML)
   public Response deleteWithForwardRequest(
       @PathParam("role") String role,
       @PathParam("env") String env,
@@ -139,7 +130,6 @@ public class Mname {
 
   @GET
   @Path("/{role}/{env}/{job}/{instance}")
-  @Produces(MediaType.TEXT_HTML)
   public Response get(
       @PathParam("role") String role,
       @PathParam("env") String env,
@@ -147,12 +137,11 @@ public class Mname {
       @PathParam("instance") int instanceId,
       @Context UriInfo uriInfo) {
 
-    return get(role, env, job, instanceId, uriInfo, Optional.<String>absent());
+    return get(role, env, job, instanceId, uriInfo, Optional.absent());
   }
 
   @PUT
   @Path("/{role}/{env}/{job}/{instance}")
-  @Produces(MediaType.TEXT_HTML)
   public Response put(
       @PathParam("role") String role,
       @PathParam("env") String env,
@@ -160,12 +149,11 @@ public class Mname {
       @PathParam("instance") int instanceId,
       @Context UriInfo uriInfo) {
 
-    return get(role, env, job, instanceId, uriInfo, Optional.<String>absent());
+    return get(role, env, job, instanceId, uriInfo, Optional.absent());
   }
 
   @POST
   @Path("/{role}/{env}/{job}/{instance}")
-  @Produces(MediaType.TEXT_HTML)
   public Response post(
       @PathParam("role") String role,
       @PathParam("env") String env,
@@ -173,12 +161,11 @@ public class Mname {
       @PathParam("instance") int instanceId,
       @Context UriInfo uriInfo) {
 
-    return get(role, env, job, instanceId, uriInfo, Optional.<String>absent());
+    return get(role, env, job, instanceId, uriInfo, Optional.absent());
   }
 
   @DELETE
   @Path("/{role}/{env}/{job}/{instance}")
-  @Produces(MediaType.TEXT_HTML)
   public Response delete(
       @PathParam("role") String role,
       @PathParam("env") String env,
@@ -186,7 +173,7 @@ public class Mname {
       @PathParam("instance") int instanceId,
       @Context UriInfo uriInfo) {
 
-    return get(role, env, job, instanceId, uriInfo, Optional.<String>absent());
+    return get(role, env, job, instanceId, uriInfo, Optional.absent());
   }
 
   private Response get(
@@ -198,7 +185,7 @@ public class Mname {
       Optional<String> forwardRequest) {
 
     IScheduledTask task = Iterables.getOnlyElement(
-        Storage.Util.consistentFetchTasks(storage,
+        Storage.Util.fetchTasks(storage,
             Query.instanceScoped(JobKeys.from(role, env, job), instanceId).active()),
         null);
     if (task == null) {
@@ -232,7 +219,7 @@ public class Mname {
   @VisibleForTesting
   static Optional<Integer> getRedirectPort(IAssignedTask task) {
     Map<String, Integer> ports = task.isSetAssignedPorts()
-        ? task.getAssignedPorts() : ImmutableMap.<String, Integer>of();
+        ? task.getAssignedPorts() : ImmutableMap.of();
     for (String httpPortName : HTTP_PORT_NAMES) {
       Integer port = ports.get(httpPortName);
       if (port != null) {

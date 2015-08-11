@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,7 +14,8 @@
 package org.apache.aurora.scheduler.http;
 
 import java.util.Arrays;
-import java.util.Set;
+
+import javax.servlet.http.HttpServletRequest;
 
 import com.google.common.base.Function;
 import com.google.common.base.Optional;
@@ -24,12 +23,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.net.HostAndPort;
-import com.google.inject.util.Providers;
-import com.twitter.common.application.ShutdownRegistry.ShutdownRegistryImpl;
-import com.twitter.common.application.modules.LifecycleModule.ServiceRunner;
-import com.twitter.common.application.modules.LocalServiceRegistry;
-import com.twitter.common.application.modules.LocalServiceRegistry.LocalService;
-import com.twitter.common.base.Commands;
 import com.twitter.common.net.pool.DynamicHostSet;
 import com.twitter.common.net.pool.DynamicHostSet.HostChangeMonitor;
 import com.twitter.common.net.pool.DynamicHostSet.MonitorException;
@@ -70,34 +63,33 @@ public class LeaderRedirectTest extends EasyMockTest {
     DynamicHostSet<ServiceInstance> schedulers =
         createMock(new Clazz<DynamicHostSet<ServiceInstance>>() { });
 
-    ServiceRunner fakeRunner = new ServiceRunner() {
-      @Override
-      public LocalService launch() {
-        return LocalService.auxiliaryService(HTTP_PORT_NAME, HTTP_PORT, Commands.NOOP);
-      }
-    };
+    HttpService http = createMock(HttpService.class);
+    expect(http.getAddress()).andStubReturn(HostAndPort.fromParts("localhost", HTTP_PORT));
 
-    Set<ServiceRunner> services = ImmutableSet.of(fakeRunner);
-    LocalServiceRegistry serviceRegistry =
-        new LocalServiceRegistry(Providers.of(services), new ShutdownRegistryImpl());
-    leaderRedirector = new LeaderRedirect(serviceRegistry, schedulers);
+    leaderRedirector = new LeaderRedirect(http, schedulers);
 
     monitorCapture = new Capture<>();
     expect(schedulers.watch(capture(monitorCapture))).andReturn(null);
+  }
+
+  private void replayAndMonitor() throws Exception {
     control.replay();
     leaderRedirector.monitor();
   }
 
-  @Ignore("http://jira.local.twitter.com/browse/MESOS-323")
+  @Ignore("https://issues.apache.org/jira/browse/AURORA-842")
   @Test
-  public void testLeader() {
+  public void testLeader() throws Exception {
+    replayAndMonitor();
     publishSchedulers(localPort(HTTP_PORT));
 
-    assertEquals(Optional.<HostAndPort>absent(), leaderRedirector.getRedirect());
+    assertEquals(Optional.absent(), leaderRedirector.getRedirect());
   }
 
   @Test
-  public void testNotLeader() {
+  public void testNotLeader() throws Exception {
+    replayAndMonitor();
+
     HostAndPort remote = HostAndPort.fromParts("foobar", HTTP_PORT);
     publishSchedulers(remote);
 
@@ -105,7 +97,9 @@ public class LeaderRedirectTest extends EasyMockTest {
   }
 
   @Test
-  public void testLeaderOnSameHost() {
+  public void testLeaderOnSameHost() throws Exception {
+    replayAndMonitor();
+
     HostAndPort local = localPort(555);
     publishSchedulers(local);
 
@@ -113,25 +107,84 @@ public class LeaderRedirectTest extends EasyMockTest {
   }
 
   @Test
-  public void testNoLeaders() {
-    assertEquals(Optional.<HostAndPort>absent(), leaderRedirector.getRedirect());
+  public void testNoLeaders() throws Exception {
+    replayAndMonitor();
+
+    assertEquals(Optional.absent(), leaderRedirector.getRedirect());
   }
 
   @Test
-  public void testMultipleLeaders() {
+  public void testMultipleLeaders() throws Exception {
+    replayAndMonitor();
+
     publishSchedulers(HostAndPort.fromParts("foobar", 500), HostAndPort.fromParts("baz", 800));
 
-    assertEquals(Optional.<HostAndPort>absent(), leaderRedirector.getRedirect());
+    assertEquals(Optional.absent(), leaderRedirector.getRedirect());
   }
 
   @Test
-  public void testBadServiceInstance() {
+  public void testBadServiceInstance() throws Exception {
+    replayAndMonitor();
+
     ServiceInstance badLocal = new ServiceInstance()
         .setAdditionalEndpoints(ImmutableMap.of("foo", new Endpoint("localhost", 500)));
 
     publishSchedulers(ImmutableSet.of(badLocal));
 
-    assertEquals(Optional.<HostAndPort>absent(), leaderRedirector.getRedirect());
+    assertEquals(Optional.absent(), leaderRedirector.getRedirect());
+  }
+
+  private HttpServletRequest mockRequest(String attributeValue, String queryString) {
+    HttpServletRequest mockRequest = createMock(HttpServletRequest.class);
+    expect(mockRequest.getScheme()).andReturn("http");
+    expect(mockRequest.getAttribute(JettyServerModule.ORIGINAL_PATH_ATTRIBUTE_NAME))
+        .andReturn(attributeValue);
+    expect(mockRequest.getRequestURI()).andReturn("/some/path");
+    expect(mockRequest.getQueryString()).andReturn(queryString);
+
+    return mockRequest;
+  }
+
+  @Test
+  public void testRedirectTargetNoAttribute() throws Exception {
+    HttpServletRequest mockRequest = mockRequest(null, null);
+
+    replayAndMonitor();
+
+    HostAndPort remote = HostAndPort.fromParts("foobar", HTTP_PORT);
+    publishSchedulers(remote);
+
+    assertEquals(
+        Optional.of("http://foobar:500/some/path"),
+        leaderRedirector.getRedirectTarget(mockRequest));
+  }
+
+  @Test
+  public void testRedirectTargetWithAttribute() throws Exception {
+    HttpServletRequest mockRequest = mockRequest("/the/original/path", null);
+
+    replayAndMonitor();
+
+    HostAndPort remote = HostAndPort.fromParts("foobar", HTTP_PORT);
+    publishSchedulers(remote);
+
+    assertEquals(
+        Optional.of("http://foobar:500/the/original/path"),
+        leaderRedirector.getRedirectTarget(mockRequest));
+  }
+
+  @Test
+  public void testRedirectTargetQueryString() throws Exception {
+    HttpServletRequest mockRequest = mockRequest(null, "bar=baz");
+
+    replayAndMonitor();
+
+    HostAndPort remote = HostAndPort.fromParts("foobar", HTTP_PORT);
+    publishSchedulers(remote);
+
+    assertEquals(
+        Optional.of("http://foobar:500/some/path?bar=baz"),
+        leaderRedirector.getRedirectTarget(mockRequest));
   }
 
   private void publishSchedulers(HostAndPort... schedulerHttpEndpoints) {

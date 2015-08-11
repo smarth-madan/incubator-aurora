@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,21 +14,14 @@
 
 import os
 
-python_library(
-  name = 'schema',
-  sources = globs('*.py'),
-  dependencies = [
-    pants('3rdparty/python:pystachio'),
-    pants('3rdparty/python:twitter.common.lang'),
-    pants('src/main/python/apache/thermos/common:planner')
-  ],
-)
 
 python_library(
   name = 'config',
+  sources = rglobs('*.py'),
   dependencies = [
-    pants(':schema'),
-    pants('src/main/python/apache/thermos/common'),  # cover common:planner
+    '3rdparty/python:pystachio',
+    '3rdparty/python:twitter.common.lang',
+    'src/main/python/apache/thermos/common',
   ],
   provides = setup_py(
     name = 'apache.thermos.config',

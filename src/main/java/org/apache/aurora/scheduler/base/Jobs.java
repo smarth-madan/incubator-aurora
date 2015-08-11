@@ -1,6 +1,4 @@
 /**
- * Copyright 2014 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,6 +14,7 @@
 package org.apache.aurora.scheduler.base;
 
 import org.apache.aurora.gen.JobStats;
+import org.apache.aurora.gen.ScheduleStatus;
 import org.apache.aurora.scheduler.storage.entities.IJobStats;
 import org.apache.aurora.scheduler.storage.entities.IScheduledTask;
 
@@ -37,38 +36,41 @@ public final class Jobs {
   public static IJobStats getJobStats(Iterable<IScheduledTask> tasks) {
     JobStats stats = new JobStats();
     for (IScheduledTask task : tasks) {
-      switch (task.getStatus()) {
-        case INIT:
-        case PENDING:
-        case THROTTLED:
-          stats.pendingTaskCount++;
-          break;
-
-        case ASSIGNED:
-        case STARTING:
-        case RESTARTING:
-        case RUNNING:
-        case KILLING:
-        case DRAINING:
-        case PREEMPTING:
-          stats.activeTaskCount++;
-          break;
-
-        case KILLED:
-        case FINISHED:
-          stats.finishedTaskCount++;
-          break;
-
-        case LOST:
-        case FAILED:
-        case UNKNOWN:
-          stats.failedTaskCount++;
-          break;
-
-        default:
-          throw new IllegalArgumentException("Unsupported status: " + task.getStatus());
-      }
+      updateStats(stats, task.getStatus());
     }
     return IJobStats.build(stats);
+  }
+
+  private static void updateStats(JobStats stats, ScheduleStatus status) {
+    switch (status) {
+      case INIT:
+      case PENDING:
+      case THROTTLED:
+        stats.setPendingTaskCount(stats.getPendingTaskCount() + 1);
+        break;
+
+      case ASSIGNED:
+      case STARTING:
+      case RESTARTING:
+      case RUNNING:
+      case KILLING:
+      case DRAINING:
+      case PREEMPTING:
+        stats.setActiveTaskCount(stats.getActiveTaskCount() + 1);
+        break;
+
+      case KILLED:
+      case FINISHED:
+        stats.setFinishedTaskCount(stats.getFinishedTaskCount() + 1);
+        break;
+
+      case LOST:
+      case FAILED:
+        stats.setFailedTaskCount(stats.getFailedTaskCount() + 1);
+        break;
+
+      default:
+        throw new IllegalArgumentException("Unsupported status: " + status);
+    }
   }
 }

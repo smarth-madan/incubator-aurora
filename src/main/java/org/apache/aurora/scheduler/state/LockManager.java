@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,7 +13,7 @@
  */
 package org.apache.aurora.scheduler.state;
 
-import com.google.common.base.Optional;
+import java.util.Optional;
 
 import org.apache.aurora.scheduler.storage.entities.ILock;
 import org.apache.aurora.scheduler.storage.entities.ILockKey;
@@ -54,6 +52,13 @@ public interface LockManager {
    * @throws LockException If provided lock does not exist or not identical to the stored one.
    */
   void validateIfLocked(ILockKey context, Optional<ILock> heldLock) throws LockException;
+
+  /**
+   * Returns all available locks stored.
+   *
+   * @return Set of {@link ILock} instances.
+   */
+  Iterable<ILock> getLocks();
 
   /**
    * Thrown when {@link ILock} related operation failed.

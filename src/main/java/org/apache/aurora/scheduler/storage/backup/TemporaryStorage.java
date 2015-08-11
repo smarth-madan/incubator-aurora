@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -30,9 +28,9 @@ import org.apache.aurora.scheduler.storage.Storage.MutableStoreProvider;
 import org.apache.aurora.scheduler.storage.Storage.MutateWork;
 import org.apache.aurora.scheduler.storage.Storage.StoreProvider;
 import org.apache.aurora.scheduler.storage.Storage.Work;
+import org.apache.aurora.scheduler.storage.db.DbUtil;
 import org.apache.aurora.scheduler.storage.entities.IScheduledTask;
 import org.apache.aurora.scheduler.storage.log.SnapshotStoreImpl;
-import org.apache.aurora.scheduler.storage.mem.MemStorage;
 
 /**
  * A short-lived in-memory storage system that can be converted to a {@link Snapshot}.
@@ -53,7 +51,7 @@ interface TemporaryStorage {
    * @param query Query builder for tasks to fetch.
    * @return Matching tasks.
    */
-  Set<IScheduledTask> fetchTasks(Query.Builder query);
+  Iterable<IScheduledTask> fetchTasks(Query.Builder query);
 
   /**
    * Creates a snapshot of the contents of the temporary storage.
@@ -68,7 +66,7 @@ interface TemporaryStorage {
   class TemporaryStorageFactory implements Function<Snapshot, TemporaryStorage> {
     @Override
     public TemporaryStorage apply(Snapshot snapshot) {
-      final Storage storage = MemStorage.newEmptyStorage();
+      final Storage storage = DbUtil.createFlaggedStorage();
       FakeClock clock = new FakeClock();
       clock.setNowMillis(snapshot.getTimestamp());
       final SnapshotStore<Snapshot> snapshotStore = new SnapshotStoreImpl(clock, storage);
@@ -79,9 +77,9 @@ interface TemporaryStorage {
         public void deleteTasks(final Query.Builder query) {
           storage.write(new MutateWork.NoResult.Quiet() {
             @Override
-            protected void execute(MutableStoreProvider storeProvider) {
+            public void execute(MutableStoreProvider storeProvider) {
               Set<String> ids = FluentIterable.from(storeProvider.getTaskStore().fetchTasks(query))
-                  .transform(Tasks.SCHEDULED_TO_ID)
+                  .transform(Tasks::id)
                   .toSet();
               storeProvider.getUnsafeTaskStore().deleteTasks(ids);
             }
@@ -89,10 +87,10 @@ interface TemporaryStorage {
         }
 
         @Override
-        public Set<IScheduledTask> fetchTasks(final Query.Builder query) {
-          return storage.consistentRead(new Work.Quiet<Set<IScheduledTask>>() {
+        public Iterable<IScheduledTask> fetchTasks(final Query.Builder query) {
+          return storage.read(new Work.Quiet<Iterable<IScheduledTask>>() {
             @Override
-            public Set<IScheduledTask> apply(StoreProvider storeProvider) {
+            public Iterable<IScheduledTask> apply(StoreProvider storeProvider) {
               return storeProvider.getTaskStore().fetchTasks(query);
             }
           });

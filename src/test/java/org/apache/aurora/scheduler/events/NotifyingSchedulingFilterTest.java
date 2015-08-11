@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -17,18 +15,22 @@ package org.apache.aurora.scheduler.events;
 
 import java.util.Set;
 
-import com.google.common.base.Suppliers;
 import com.google.common.collect.ImmutableSet;
 import com.twitter.common.testing.easymock.EasyMockTest;
 
+import org.apache.aurora.gen.HostAttributes;
+import org.apache.aurora.gen.MaintenanceMode;
 import org.apache.aurora.gen.TaskConfig;
 import org.apache.aurora.scheduler.ResourceSlot;
+import org.apache.aurora.scheduler.base.TaskGroupKey;
 import org.apache.aurora.scheduler.events.PubsubEvent.Vetoed;
 import org.apache.aurora.scheduler.filter.AttributeAggregate;
 import org.apache.aurora.scheduler.filter.SchedulingFilter;
+import org.apache.aurora.scheduler.filter.SchedulingFilter.ResourceRequest;
+import org.apache.aurora.scheduler.filter.SchedulingFilter.UnusedResource;
 import org.apache.aurora.scheduler.filter.SchedulingFilter.Veto;
-import org.apache.aurora.scheduler.storage.AttributeStore;
-import org.apache.aurora.scheduler.storage.entities.IScheduledTask;
+import org.apache.aurora.scheduler.mesos.TaskExecutors;
+import org.apache.aurora.scheduler.storage.entities.IHostAttributes;
 import org.apache.aurora.scheduler.storage.entities.ITaskConfig;
 import org.junit.Before;
 import org.junit.Test;
@@ -42,46 +44,45 @@ public class NotifyingSchedulingFilterTest extends EasyMockTest {
       .setNumCpus(1)
       .setRamMb(1024)
       .setDiskMb(1024));
-  private static final ResourceSlot TASK_RESOURCES = ResourceSlot.from(TASK);
-  private static final String TASK_ID = "taskId";
-  private static final String SLAVE = "slaveHost";
+  private static final TaskGroupKey GROUP_KEY = TaskGroupKey.from(TASK);
+  private static final UnusedResource RESOURCE = new UnusedResource(
+      ResourceSlot.from(TASK, TaskExecutors.NO_OVERHEAD_EXECUTOR),
+      IHostAttributes.build(new HostAttributes().setHost("host").setMode(MaintenanceMode.NONE)));
+  private static final ResourceRequest REQUEST =
+      new ResourceRequest(TASK, AttributeAggregate.EMPTY);
 
-  private static final Veto VETO_1 = new Veto("veto1", 1);
-  private static final Veto VETO_2 = new Veto("veto2", 2);
+  private static final Veto VETO_1 = Veto.insufficientResources("ram", 1);
+  private static final Veto VETO_2 = Veto.insufficientResources("ram", 2);
 
   private SchedulingFilter filter;
   private EventSink eventSink;
   private SchedulingFilter delegate;
-  private AttributeAggregate emptyJob;
 
   @Before
   public void setUp() {
     delegate = createMock(SchedulingFilter.class);
     eventSink = createMock(EventSink.class);
     filter = new NotifyingSchedulingFilter(delegate, eventSink);
-    emptyJob = new AttributeAggregate(
-        Suppliers.ofInstance(ImmutableSet.<IScheduledTask>of()),
-        createMock(AttributeStore.class));
   }
 
   @Test
   public void testEvents() {
     Set<Veto> vetoes = ImmutableSet.of(VETO_1, VETO_2);
-    expect(delegate.filter(TASK_RESOURCES, SLAVE, TASK, TASK_ID, emptyJob)).andReturn(vetoes);
-    eventSink.post(new Vetoed(TASK_ID, vetoes));
+    expect(delegate.filter(RESOURCE, REQUEST)).andReturn(vetoes);
+    eventSink.post(new Vetoed(GROUP_KEY, vetoes));
 
     control.replay();
 
-    assertEquals(vetoes, filter.filter(TASK_RESOURCES, SLAVE, TASK, TASK_ID, emptyJob));
+    assertEquals(vetoes, filter.filter(RESOURCE, REQUEST));
   }
 
   @Test
   public void testNoVetoes() {
     Set<Veto> vetoes = ImmutableSet.of();
-    expect(delegate.filter(TASK_RESOURCES, SLAVE, TASK, TASK_ID, emptyJob)).andReturn(vetoes);
+    expect(delegate.filter(RESOURCE, REQUEST)).andReturn(vetoes);
 
     control.replay();
 
-    assertEquals(vetoes, filter.filter(TASK_RESOURCES, SLAVE, TASK, TASK_ID, emptyJob));
+    assertEquals(vetoes, filter.filter(RESOURCE, REQUEST));
   }
 }

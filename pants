@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,20 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-set -o errexit
-set -o nounset
+# Wrapper script for self-bootstrapping pants.
+set -e
 
 HERE=$(cd `dirname "${BASH_SOURCE[0]}"` && pwd)
+PANTS_VERSION=$(cat $HERE/.pantsversion)
+# Pinned pants requirements - to upgrade pants change this file.
+PANTS_REQUIREMENTS="$HERE/build-support/pants_requirements.txt"
+if ! [ -f "$HERE/build-support/pants.venv/BOOTSTRAPPED" ] || \
+    [[ $(< "$HERE/build-support/pants.venv/BOOTSTRAPPED") != $PANTS_VERSION ]]; then
 
-PANTS_VERSION=0.0.14-dev2
-if ! [[ -e "$HERE/build-support/pants-$PANTS_VERSION.pex" ]]; then
-  echo "Building pants.pex @ $PANTS_VERSION"
-  "$HERE/build-support/pex" \
-    --requirement "twitter.pants==$PANTS_VERSION" \
-    --entry-point twitter.pants.bin.pants_exe:main \
-    -p "$HERE/build-support/pants-$PANTS_VERSION.pex.tmp"
-  mv "$HERE/build-support/pants-$PANTS_VERSION.pex.tmp" "$HERE/build-support/pants-$PANTS_VERSION.pex"  # 2PC
-  echo "Built pants-$PANTS_VERSION.pex"
+  echo Bootstrapping pants @ $PANTS_VERSION
+  rm -fr "$HERE/build-support/pants.venv"
+  "$HERE/build-support/virtualenv" "$HERE/build-support/pants.venv"
+  # TODO(ksweeney): remove this hack when https://github.com/pantsbuild/pex/issues/21 is fixed.
+  rm -fr "$HERE/build-support/pants.venv/local"
+  source "$HERE/build-support/pants.venv/bin/activate"
+  python -m pip install -r "$PANTS_REQUIREMENTS"
+  echo $PANTS_VERSION > "$HERE/build-support/pants.venv/BOOTSTRAPPED"
 fi
-
-exec "$HERE/build-support/pants-$PANTS_VERSION.pex" "$@"
+source "$HERE/build-support/pants.venv/bin/activate"
+exec pants "$@"

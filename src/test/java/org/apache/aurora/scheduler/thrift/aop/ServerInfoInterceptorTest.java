@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -22,9 +20,7 @@ import com.google.inject.Injector;
 import com.google.inject.matcher.Matchers;
 import com.twitter.common.testing.easymock.EasyMockTest;
 
-import org.apache.aurora.gen.AuroraAdmin;
 import org.apache.aurora.gen.GetJobsResult;
-import org.apache.aurora.gen.JobConfiguration;
 import org.apache.aurora.gen.Response;
 import org.apache.aurora.gen.Result;
 import org.apache.aurora.gen.ServerInfo;
@@ -36,24 +32,26 @@ import org.junit.Test;
 import static org.apache.aurora.gen.ResponseCode.OK;
 import static org.easymock.EasyMock.expect;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
 
 public class ServerInfoInterceptorTest extends EasyMockTest {
 
   private static final String ROLE = "bob";
 
-  private AuroraAdmin.Iface realThrift;
-  private AuroraAdmin.Iface decoratedThrift;
+  private AnnotatedAuroraAdmin realThrift;
+  private AnnotatedAuroraAdmin decoratedThrift;
 
-  private static final IServerInfo SERVER_INFO =
-      IServerInfo.build(new ServerInfo().setClusterName("test").setThriftAPIVersion(1));
+  private static final IServerInfo SERVER_INFO = IServerInfo.build(
+      new ServerInfo()
+          .setClusterName("test")
+          .setThriftAPIVersion(1)
+          .setStatsUrlPrefix("fake_url"));
 
   private ServerInfoInterceptor interceptor;
 
   @Before
   public void setUp() {
     interceptor = new ServerInfoInterceptor();
-    realThrift = createMock(AuroraAdmin.Iface.class);
+    realThrift = createMock(AnnotatedAuroraAdmin.class);
     Injector injector = Guice.createInjector(new AbstractModule() {
       @Override
       protected void configure() {
@@ -65,19 +63,7 @@ public class ServerInfoInterceptorTest extends EasyMockTest {
             interceptor);
       }
     });
-    decoratedThrift = injector.getInstance(AuroraAdmin.Iface.class);
-  }
-
-  @Test
-  public void testVersionIsSet() throws Exception {
-    Response response = okResponse(
-        Result.getJobsResult(
-            new GetJobsResult().setConfigs(ImmutableSet.<JobConfiguration>of())));
-
-    expect(realThrift.getJobs(ROLE)).andReturn(response);
-    control.replay();
-
-    assertNotNull(decoratedThrift.getJobs(ROLE).DEPRECATEDversion);
+    decoratedThrift = injector.getInstance(AnnotatedAuroraAdmin.class);
   }
 
   @Test
@@ -86,15 +72,14 @@ public class ServerInfoInterceptorTest extends EasyMockTest {
         new ServerInfo().setClusterName("FAKECLUSTER").setThriftAPIVersion(100000);
 
     Response response = okResponse(
-            Result.getJobsResult(
-                new GetJobsResult().setConfigs(ImmutableSet.<JobConfiguration>of())))
-            .setServerInfo(previousServerInfo);
+        Result.getJobsResult(new GetJobsResult().setConfigs(ImmutableSet.of())))
+        .setServerInfo(previousServerInfo);
 
     expect(realThrift.getJobs(ROLE)).andReturn(response);
 
     control.replay();
 
-    assertEquals(SERVER_INFO.newBuilder(), decoratedThrift.getJobs(ROLE).serverInfo);
+    assertEquals(SERVER_INFO.newBuilder(), decoratedThrift.getJobs(ROLE).getServerInfo());
   }
 
   private static Response okResponse(Result result) {

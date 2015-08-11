@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,25 +12,25 @@
 # limitations under the License.
 #
 
-import copy
 import json
 import os
+import random
 import re
 import textwrap
-
-from apache.thermos.common.planner import TaskPlanner
-from apache.thermos.config.schema import Task
 
 from pystachio import Ref
 from pystachio.config import Config
 from twitter.common.dirutil import safe_open
-from twitter.common.lang import Compatibility
+
+from apache.thermos.common.planner import TaskPlanner
+from apache.thermos.config.schema import Task, ThermosContext
+
 
 class PortExtractor(object):
   class InvalidPorts(Exception): pass
 
-  @staticmethod
-  def extract(obj):
+  @classmethod
+  def extract(cls, obj):
     port_scope = Ref.from_address('thermos.ports')
     _, uninterp = obj.interpolate()
     ports = []
@@ -40,7 +38,7 @@ class PortExtractor(object):
       subscope = port_scope.scoped_to(ref)
       if subscope is not None:
         if not subscope.is_index():
-          raise PortExtractor.InvalidPorts(
+          raise cls.InvalidPorts(
             'Bad port specification "%s" (should be of form "thermos.ports[name]"' % ref.address())
         ports.append(subscope.action().value)
     return ports
@@ -60,10 +58,10 @@ class ThermosProcessWrapper(object):
     except PortExtractor.InvalidPorts:
       raise self.InvalidProcess('Process has invalid ports scoping!')
 
-  @staticmethod
-  def assert_valid_process_name(name):
-    if not ThermosProcessWrapper.VALID_PROCESS_NAME_RE.match(name):
-      raise ThermosProcessWrapper.InvalidProcess('Invalid process name: %s' % name)
+  @classmethod
+  def assert_valid_process_name(cls, name):
+    if not cls.VALID_PROCESS_NAME_RE.match(name):
+      raise cls.InvalidProcess('Invalid process name: %s' % name)
 
 
 class ThermosTaskWrapper(object):
@@ -73,7 +71,7 @@ class ThermosTaskWrapper(object):
     if bindings:
       task = task.bind(*bindings)
     if not task.check().ok() and strict:
-      raise ThermosTaskWrapper.InvalidTask(task.check().message())
+      raise self.InvalidTask(task.check().message())
     self._task = task
 
   @property
@@ -99,13 +97,13 @@ class ThermosTaskWrapper(object):
     with safe_open(filename, 'w') as fp:
       json.dump(ti.get(), fp)
 
-  @staticmethod
-  def from_file(filename, **kw):
+  @classmethod
+  def from_file(cls, filename, **kw):
     try:
       with safe_open(filename) as fp:
         task = Task.json_load(fp)
-      return ThermosTaskWrapper(task, **kw)
-    except Exception as e:
+      return cls(task, **kw)
+    except Exception:
       return None
 
 
@@ -118,12 +116,13 @@ class ThermosTaskValidator(object):
     cls.assert_valid_names(task)
     cls.assert_typecheck(task)
     cls.assert_valid_plan(task)
+    cls.assert_all_refs_bound(task)
 
   @classmethod
   def assert_valid_plan(cls, task):
     try:
-      TaskPlanner(task, process_filter=lambda proc: proc.final().get() == False)
-      TaskPlanner(task, process_filter=lambda proc: proc.final().get() == True)
+      TaskPlanner(task, process_filter=lambda proc: proc.final().get() is False)
+      TaskPlanner(task, process_filter=lambda proc: proc.final().get() is True)
     except TaskPlanner.InvalidSchedule as e:
       raise cls.InvalidTaskError('Task has invalid plan: %s' % e)
 
@@ -157,6 +156,25 @@ class ThermosTaskValidator(object):
       if not task_on_disk or task_on_disk.task != task:
         raise cls.InvalidTaskError('Task differs from on disk copy: %r vs %r' % (
             task_on_disk.task if task_on_disk else None, task))
+
+  @classmethod
+  def assert_all_refs_bound(cls, task):
+    port_names = PortExtractor.extract(task)
+
+    # Create fake bindings and make sure that there are no unbound refs afterwards.  If
+    # there are unbound refs that could indicate improper scoping e.g.
+    # {{array[{{mesos.instance}}]}} which is disallowed.
+    thermos_bindings = ThermosContext(
+        task_id='dummy_task_id',
+        user='dummy_user',
+        ports=dict((name, random.randrange(30000, 40000)) for name in port_names),
+    )
+    task_instance, unbindable_refs = (task % dict(thermos=thermos_bindings)).interpolate()
+
+    if len(unbindable_refs) != 0:
+      raise cls.InvalidTaskError(
+          'Unexpected unbound refs: %s. Make sure you are not nesting template variables.'
+          % ' '.join(map(str, unbindable_refs)))
 
 
 class ThermosConfigLoader(object):

@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,15 +12,16 @@
 # limitations under the License.
 #
 
+from argparse import ArgumentTypeError
 from collections import namedtuple
+
+from pystachio import Ref
+from twitter.common.quantity.parse_simple import parse_time
 
 from apache.aurora.common.aurora_job_key import AuroraJobKey
 
-from twitter.common.lang import Compatibility
-from twitter.common.quantity.parse_simple import parse_time
-from argparse import ArgumentTypeError
 
-
+# TODO(wfarner): Consider removing, it doesn't appear this wrapper is useful.
 class CommandOption(object):
   """A lightweight encapsulation of an argparse option specification"""
 
@@ -36,54 +35,10 @@ class CommandOption(object):
         break
     else:
       raise ValueError('CommandOption had no valid name.')
-    self.args = args
-    self.kwargs = kwargs
-    self.type = kwargs.get('type')
-    self.help = kwargs.get('help', '')
-
-  def is_mandatory(self):
-    return self.kwargs.get('required', not self.name.startswith('--'))
-
-  def get_displayname(self):
-    """Get a display name for a the expected format of a parameter value"""
-    if 'metavar' in self.kwargs:
-      displayname = self.kwargs['metavar']
-    elif self.type is str:
-      displayname = "str"
-    elif isinstance(self.type, Compatibility.string):
-      displayname = self.type
-    elif isinstance(self.type, Compatibility.integer):
-      displayname = "int",
-    else:
-      displayname = "value"
-    return displayname
-
-  def render_usage(self):
-    """Create a usage string for this option"""
-    if not self.name.startswith('--'):
-      return self.get_displayname()
-    if "action" in self.kwargs:
-      if self.kwargs["action"] == "store_true":
-        return "[%s]" % self.name
-      elif self.kwargs["action"] == "store_false":
-        return "[--no-%s]" % self.name[2:]
-    if self.type is None and "choices" in self.kwargs:
-      return "[%s=%s]" % (self.name, self.kwargs["choices"])
-    else:
-      return "[%s=%s]" % (self.name, self.get_displayname())
-
-  def render_help(self):
-    """Render a full help message for this option"""
-    result = ""
-    if "action" in self.kwargs and self.kwargs["action"] == "store_true":
-      result = self.name
-    elif "action" in self.kwargs and self.kwargs["action"] == "store_false":
-      result = "--no-%s" % self.name[2:]
-    elif self.type is None and "choices" in self.kwargs:
-      result = "%s=%s" % (self.name, self.kwargs["choices"])
-    else:
-      result = "%s=%s" % (self.name, self.get_displayname())
-    return [result, "\t" + self.help]
+    self.args = args[:]
+    self.kwargs = kwargs.copy()
+    self.type = self.kwargs.get('type')
+    self.help = self.kwargs.get('help', '')
 
   def add_to_parser(self, parser):
     """Add this option to an option parser"""
@@ -98,20 +53,31 @@ def parse_qualified_role(rolestr):
     raise ArgumentTypeError('Role argument must be a CLUSTER/NAME pair')
   return role_parts
 
+
+ALL_INSTANCES = None
+
+
 def parse_instances(instances):
-  """Parse lists of instances or instance ranges into a set().
+  """Parse lists of instances or instance ranges into a set(). This accepts a comma-separated
+  list of instances.
+
      Examples:
        0-2
        0,1-3,5
        1,3,5
   """
-  if instances is None or instances == '':
+  if instances is None or instances == "":
     return None
   result = set()
   for part in instances.split(','):
     x = part.split('-')
-    result.update(range(int(x[0]), int(x[-1]) + 1))
+    start = int(x[0])
+    end = int(x[-1]) + 1
+    if start >= end:
+      raise ArgumentTypeError('Invalid instance range: %s' % x)
+    result.update(range(start, end))
   return sorted(result)
+
 
 def parse_time_values(time_values):
   """Parse lists of discrete time values. Every value must be in the following format: XdYhZmWs.
@@ -123,6 +89,7 @@ def parse_time_values(time_values):
     return sorted(map(parse_time, time_values.split(','))) if time_values else None
   except ValueError as e:
     raise ArgumentTypeError(e)
+
 
 def parse_percentiles(percentiles):
   """Parse lists of percentile values in (0,100) range.
@@ -143,7 +110,8 @@ def parse_percentiles(percentiles):
   return sorted(map(parse_percentile, percentiles.split(','))) if percentiles else None
 
 
-TaskInstanceKey = namedtuple('TaskInstanceKey', [ 'jobkey', 'instance' ])
+TaskInstanceKey = namedtuple('TaskInstanceKey', ['jobkey', 'instance'])
+
 
 def parse_task_instance_key(key):
   pieces = key.split('/')
@@ -158,25 +126,62 @@ def parse_task_instance_key(key):
   return TaskInstanceKey(AuroraJobKey(cluster, role, env, name), instance)
 
 
-BATCH_OPTION = CommandOption('--batch-size', type=int, default=5,
+def instance_specifier(spec_str):
+  if spec_str is None or spec_str == '':
+    raise ValueError('Instance specifier must be non-empty')
+  parts = spec_str.split('/')
+  if len(parts) == 4:
+    jobkey = AuroraJobKey(*parts)
+    return TaskInstanceKey(jobkey, ALL_INSTANCES)
+  elif len(parts) != 5:
+    raise ArgumentTypeError('Instance specifier must be a CLUSTER/ROLE/ENV/JOB/INSTANCES tuple')
+  (cluster, role, env, name, instance_str) = parts
+  jobkey = AuroraJobKey(cluster, role, env, name)
+  instances = parse_instances(instance_str)
+  return TaskInstanceKey(jobkey, instances)
+
+
+def binding_parser(binding):
+  """Pystachio takes bindings in the form of a list of dictionaries. Each pystachio binding
+  becomes another dictionary in the list. So we need to convert the bindings specified by
+  the user from a list of "name=value" formatted strings to a list of the dictionaries
+  expected by pystachio.
+  """
+  binding_parts = binding.split("=", 1)
+  if len(binding_parts) < 2:
+    raise ValueError('Binding parameter must be formatted name=value')
+  try:
+    ref = Ref.from_address(binding_parts[0])
+  except Ref.InvalidRefError as e:
+    raise ValueError("Could not parse binding parameter %s: %s" % (binding, e))
+  return {ref: binding_parts[1]}
+
+
+BATCH_OPTION = CommandOption('--batch-size', type=int, default=1,
         help='Number of instances to be operate on in one iteration')
 
 
-BIND_OPTION = CommandOption('--bind', type=str, default=[], dest='bindings',
+BIND_OPTION = CommandOption('--bind', dest='bindings',
     action='append',
-    metavar="pystachio-binding",
-    help='Bind a thermos mustache variable name to a value. '
+    default=[],
+    metavar="var=value",
+    type=binding_parser,
+    help='Bind a pystachio variable name to a value. '
     'Multiple flags may be used to specify multiple values.')
 
 
 BROWSER_OPTION = CommandOption('--open-browser', default=False, dest='open_browser',
     action='store_true',
-    help='open browser to view job page after job is created')
+    help='Open browser to view job page after job is created')
 
 
-CONFIG_ARGUMENT = CommandOption('config_file', type=str,
-    help='pathname of the aurora configuration file contain the job specification')
+CONFIG_ARGUMENT = CommandOption('config_file', type=str, metavar="pathname",
+    help='Pathname of the aurora configuration file contain the job specification')
 
+
+CONFIG_OPTION = CommandOption('--config', type=str, default=None, metavar="pathname",
+    help='Pathname of the aurora configuration file containing job specification'
+        'and possibly API hook definitions')
 
 EXECUTOR_SANDBOX_OPTION = CommandOption('--executor-sandbox', action='store_true',
      default=False, help='Run the command in the executor sandbox instead of the task sandbox')
@@ -197,9 +202,25 @@ INSTANCES_OPTION = CommandOption('--instances', type=parse_instances, dest='inst
          'or a range (e.g. 0-2) or any combination of the two (e.g. 0-2,5,7-9). If not set, '
          'all instances will be acted on.')
 
+INSTANCES_SPEC_ARGUMENT = CommandOption('instance_spec', type=instance_specifier,
+    default=None, metavar="CLUSTER/ROLE/ENV/NAME[/INSTANCES]",
+    help=('Fully specified job instance key, in CLUSTER/ROLE/ENV/NAME[/INSTANCES] format. '
+        'If INSTANCES is omitted, then all instances will be operated on.'))
 
-JOBSPEC_ARGUMENT = CommandOption('jobspec', type=AuroraJobKey.from_path,
+
+def jobkeytype(v):
+  """wrapper for AuroraJobKey.from_path that improves error messages"""
+  return AuroraJobKey.from_path(v)
+
+
+JOBSPEC_ARGUMENT = CommandOption('jobspec', type=jobkeytype,
     metavar="CLUSTER/ROLE/ENV/NAME",
+    help='Fully specified job key, in CLUSTER/ROLE/ENV/NAME format')
+
+
+JOBSPEC_OPTION = CommandOption('--job', type=AuroraJobKey.from_path,
+    metavar="CLUSTER/ROLE/ENV/NAME",
+    dest="jobspec",
     help='Fully specified job key, in CLUSTER/ROLE/ENV/NAME format')
 
 
@@ -213,12 +234,27 @@ JSON_WRITE_OPTION = CommandOption('--write-json', default=False, dest='write_jso
     help='Generate command output in JSON format')
 
 
+MAX_TOTAL_FAILURES_OPTION = CommandOption('--max-total-failures', type=int, default=0,
+     help='Maximum number of instance failures to be tolerated in total before aborting.')
+
+
+NO_BATCHING_OPTION = CommandOption('--no-batching', default=False, action='store_true',
+  help='Run the command on all instances at once, instead of running in batches')
+
+
 ROLE_ARGUMENT = CommandOption('role', type=parse_qualified_role, metavar='CLUSTER/NAME',
     help='Rolename to retrieve information about')
 
+ROLE_OPTION = CommandOption('--role', metavar='ROLENAME', default=None,
+    help='Name of the user/role')
 
-SSH_USER_OPTION = CommandOption('--ssh-user', '-l', default=None,
+SSH_USER_OPTION = CommandOption('--ssh-user', '-l', default=None, metavar="ssh_username",
     help='ssh as this username instead of the job\'s role')
+
+
+STRICT_OPTION = CommandOption('--strict', default=False, action='store_true',
+    help=("Check instances and generate an error for instance ranges in parameters "
+    "that are larger than the actual set of instances in the job"))
 
 
 TASK_INSTANCE_ARGUMENT = CommandOption('task_instance', type=parse_task_instance_key,
@@ -228,6 +264,3 @@ TASK_INSTANCE_ARGUMENT = CommandOption('task_instance', type=parse_task_instance
 WATCH_OPTION = CommandOption('--watch-secs', type=int, default=30,
     help='Minimum number of seconds a instance must remain in RUNNING state before considered a '
          'success.')
-
-
-

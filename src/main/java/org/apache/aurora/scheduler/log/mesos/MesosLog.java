@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -29,6 +27,7 @@ import java.util.logging.Logger;
 import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.inject.Provider;
+import javax.inject.Qualifier;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Optional;
@@ -36,7 +35,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.UnmodifiableIterator;
 import com.google.common.primitives.Longs;
-import com.google.inject.BindingAnnotation;
 import com.twitter.common.application.Lifecycle;
 import com.twitter.common.base.Function;
 import com.twitter.common.base.MorePreconditions;
@@ -53,8 +51,7 @@ import org.apache.mesos.Log;
 import static java.lang.annotation.ElementType.METHOD;
 import static java.lang.annotation.ElementType.PARAMETER;
 import static java.lang.annotation.RetentionPolicy.RUNTIME;
-
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
 
 /**
  * A {@code Log} implementation backed by a true distributed log in mesos core.
@@ -66,7 +63,7 @@ public class MesosLog implements org.apache.aurora.scheduler.log.Log {
   /**
    * Binding annotation for the opaque value of a log noop entry.
    */
-  @BindingAnnotation
+  @Qualifier
   @Retention(RUNTIME)
   @Target({ PARAMETER, METHOD })
   public @interface NoopEntry { }
@@ -74,7 +71,7 @@ public class MesosLog implements org.apache.aurora.scheduler.log.Log {
   /**
    * Binding annotation for log read timeouts.
    */
-  @BindingAnnotation
+  @Qualifier
   @Retention(RUNTIME)
   @Target({ PARAMETER, METHOD })
   public @interface ReadTimeout { }
@@ -82,7 +79,7 @@ public class MesosLog implements org.apache.aurora.scheduler.log.Log {
   /**
    * Binding annotation for log write timeouts - used for truncates and appends.
    */
-  @BindingAnnotation
+  @Qualifier
   @Retention(RUNTIME)
   @Target({ PARAMETER, METHOD })
   public @interface WriteTimeout { }
@@ -120,17 +117,17 @@ public class MesosLog implements org.apache.aurora.scheduler.log.Log {
       @NoopEntry byte[] noopEntry,
       Lifecycle lifecycle) {
 
-    this.logFactory = checkNotNull(logFactory);
+    this.logFactory = requireNonNull(logFactory);
 
-    this.readerFactory = checkNotNull(readerFactory);
-    this.readTimeout = checkNotNull(readTimeout);
+    this.readerFactory = requireNonNull(readerFactory);
+    this.readTimeout = requireNonNull(readTimeout);
 
-    this.writerFactory = checkNotNull(writerFactory);
-    this.writeTimeout = checkNotNull(writeTimeout);
+    this.writerFactory = requireNonNull(writerFactory);
+    this.writeTimeout = requireNonNull(writeTimeout);
 
-    this.noopEntry = checkNotNull(noopEntry);
+    this.noopEntry = requireNonNull(noopEntry);
 
-    this.lifecycle = checkNotNull(lifecycle);
+    this.lifecycle = requireNonNull(lifecycle);
   }
 
   @Override
@@ -174,9 +171,9 @@ public class MesosLog implements org.apache.aurora.scheduler.log.Log {
           }
         };
 
-    private final OpStats read = new OpStats("read");
-    private final OpStats append = new OpStats("append");
-    private final OpStats truncate = new OpStats("truncate");
+    private final OpStats readStats = new OpStats("read");
+    private final OpStats appendStats = new OpStats("append");
+    private final OpStats truncateStats = new OpStats("truncate");
     private final AtomicLong entriesSkipped =
         Stats.exportLong("scheduler_log_native_native_entries_skipped");
 
@@ -286,13 +283,13 @@ public class MesosLog implements org.apache.aurora.scheduler.log.Log {
                 return true;
               }
             } catch (TimeoutException e) {
-              read.timeouts.getAndIncrement();
+              readStats.timeouts.getAndIncrement();
               throw new StreamAccessException("Timeout reading from log.", e);
             } catch (Log.OperationFailedException e) {
-              read.failures.getAndIncrement();
+              readStats.failures.getAndIncrement();
               throw new StreamAccessException("Problem reading from log", e);
             } finally {
-              read.timing.accumulate(System.nanoTime() - start);
+              readStats.timing.accumulate(System.nanoTime() - start);
             }
           }
           return false;
@@ -304,7 +301,7 @@ public class MesosLog implements org.apache.aurora.scheduler.log.Log {
             throw new NoSuchElementException();
           }
 
-          Entry result = checkNotNull(entry);
+          Entry result = requireNonNull(entry);
           entry = null;
           return result;
         }
@@ -313,9 +310,9 @@ public class MesosLog implements org.apache.aurora.scheduler.log.Log {
 
     @Override
     public LogPosition append(final byte[] contents) throws StreamAccessException {
-      checkNotNull(contents);
+      requireNonNull(contents);
 
-      Log.Position position = mutate(append, new Mutation<Log.Position>() {
+      Log.Position position = mutate(appendStats, new Mutation<Log.Position>() {
         @Override
         public Log.Position apply(WriterInterface logWriter)
             throws TimeoutException, Log.WriterFailedException {
@@ -333,7 +330,7 @@ public class MesosLog implements org.apache.aurora.scheduler.log.Log {
       Preconditions.checkArgument(position instanceof LogPosition);
 
       final Log.Position before = ((LogPosition) position).unwrap();
-      mutate(truncate, new Mutation<Void>() {
+      mutate(truncateStats, new Mutation<Void>() {
         @Override
         public Void apply(WriterInterface logWriter)
             throws TimeoutException, Log.WriterFailedException {
@@ -343,8 +340,7 @@ public class MesosLog implements org.apache.aurora.scheduler.log.Log {
       });
     }
 
-    @VisibleForTesting
-    interface Mutation<T> {
+    private interface Mutation<T> {
       T apply(WriterInterface writer) throws TimeoutException, Log.WriterFailedException;
     }
 
@@ -356,8 +352,7 @@ public class MesosLog implements org.apache.aurora.scheduler.log.Log {
       throw new StreamAccessException(message, cause);
     }
 
-    @VisibleForTesting
-    synchronized <T> T mutate(OpStats stats, Mutation<T> mutation) {
+    private synchronized <T> T mutate(OpStats stats, Mutation<T> mutation) {
       if (writer == null) {
         throw new IllegalStateException("The log has encountered an error and cannot be used.");
       }
@@ -381,7 +376,8 @@ public class MesosLog implements org.apache.aurora.scheduler.log.Log {
       return LogPosition.wrap(reader.ending());
     }
 
-    private static class LogPosition implements org.apache.aurora.scheduler.log.Log.Position {
+    @VisibleForTesting
+    static class LogPosition implements org.apache.aurora.scheduler.log.Log.Position {
       private final Log.Position underlying;
 
       LogPosition(Log.Position underlying) {

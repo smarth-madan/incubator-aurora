@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,19 +12,9 @@
 # limitations under the License.
 #
 
-from pystachio import (
-  Boolean,
-  Default,
-  Empty,
-  Float,
-  Integer,
-  List,
-  Map,
-  Required,
-  String,
-  Struct
-)
+# checkstyle: noqa
 
+from pystachio import Boolean, Default, Empty, Float, Integer, List, Map, Required, String, Struct
 
 # Define constants for resources
 BYTES = 1

@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,27 +14,24 @@
 
 python_test_suite(name = 'all',
   dependencies = [
-    pants(':hooked_api'),
-    pants(':non_hooked_api'),
+    ':hooked_api',
+    ':non_hooked_api',
   ],
 )
 
 python_tests(name = 'hooked_api',
   sources = ['test_hooked_api.py'],
   dependencies = [
-    pants('3rdparty/python:mock'),
-    pants('src/main/python/apache/aurora/common:cluster'),
-    pants('src/main/python/apache/aurora/client:api'),
-    pants('src/main/python/apache/aurora/client/hooks'),
-    pants('src/main/python/apache/aurora/client:config')
+    '3rdparty/python:mock',
+    'src/main/python/apache/aurora/common',
+    'src/main/python/apache/aurora/client',
   ]
 )
 
 python_tests(name = 'non_hooked_api',
   sources = ['test_non_hooked_api.py'],
   dependencies = [
-    pants('src/main/python/apache/aurora/common:aurora_job_key'),
-    pants('src/main/python/apache/aurora/client/hooks'),
-    pants('src/main/python/apache/aurora/client:config')
+    'src/main/python/apache/aurora/common',
+    'src/main/python/apache/aurora/client',
   ],
 )

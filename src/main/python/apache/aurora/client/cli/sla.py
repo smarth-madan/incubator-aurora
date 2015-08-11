@@ -1,6 +1,4 @@
 #
-# Copyright 2014 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,20 +12,16 @@
 # limitations under the License.
 #
 
-from apache.aurora.client.cli import (
-    EXIT_OK,
-    Noun,
-    Verb,
-)
+from twitter.common.quantity import Time
+
+from apache.aurora.client.cli import EXIT_OK, Noun, Verb
 from apache.aurora.client.cli.context import AuroraCommandContext
 from apache.aurora.client.cli.options import (
-    CommandOption,
     JOBSPEC_ARGUMENT,
+    CommandOption,
     parse_percentiles,
     parse_time_values
 )
-
-from twitter.common.quantity import Time
 
 
 class GetTaskUpCountCmd(Verb):

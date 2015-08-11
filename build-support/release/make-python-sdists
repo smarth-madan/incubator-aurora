@@ -1,7 +1,21 @@
 #!/bin/bash
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
 # make-python-sdists: Generate sdists for Aurora Python code for use with pip or upload to PyPI.
 # Usage:
-#   ./build-support/make-python-sdists
+#   ./build-support/release/make-python-sdists
 #
 # Examples:
 #   Install the aurora client in a virtualenv:
@@ -12,21 +26,9 @@
 #     aurora_admin --help
 set -o errexit
 
-TARGETS=(
-  src/main/python/apache/aurora/client:client-packaged
-  src/main/python/apache/aurora/client:clientv2-packaged
-  src/main/python/apache/aurora/common
-  src/main/python/apache/aurora/config:config-packaged
-  src/main/python/apache/aurora/executor:executor-packaged
-  src/main/python/apache/thermos
-  src/main/python/apache/thermos/common
-  src/main/python/apache/thermos/config
-  src/main/python/apache/thermos/core
-  src/main/python/apache/thermos/monitoring
-  src/main/python/apache/thermos/observer
-  src/main/thrift/org/apache/aurora/gen:py-thrift-packaged
-  src/main/thrift/org/apache/thermos:py-thrift
-)
+# Use the convention of a python_library exporting a setup_py alongside each public target
+# to generate the list of setup_pys our project provides.
+TARGETS=($(./pants filter --type=python_binary src/main:: | sed 's@:.*@@'))
 
 cd "`git rev-parse --show-toplevel`"
 # Run in a virtualenv so that we use a consistent version of setuptools to generate the sdist.
@@ -40,5 +42,5 @@ fi
 source build-support/make-python-sdists.venv/bin/activate
 
 for t in "${TARGETS[@]}"; do
-  ./pants setup_py $t
+  ./pants setup-py --recursive $t
 done

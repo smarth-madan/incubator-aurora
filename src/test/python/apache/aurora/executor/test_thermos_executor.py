@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,8 +12,7 @@
 # limitations under the License.
 #
 
-from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
-from collections import defaultdict
+import contextlib
 import getpass
 import os
 import signal
@@ -23,39 +20,11 @@ import subprocess
 import tempfile
 import threading
 import time
+from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
+from collections import defaultdict
 
-from apache.aurora.config.schema.base import (
-    HealthCheckConfig,
-    MB,
-    MesosJob,
-    MesosTaskInstance,
-    Process,
-    Resources,
-    Task,
-)
-from apache.aurora.executor.common.executor_timeout import ExecutorTimeout
-from apache.aurora.executor.common.health_checker import HealthCheckerProvider
-from apache.aurora.executor.common.sandbox import DirectorySandbox, SandboxProvider
-from apache.aurora.executor.common.task_runner import TaskError
-from apache.aurora.executor.status_manager import StatusManager
-from apache.aurora.executor.thermos_task_runner import (
-    DefaultThermosTaskRunnerProvider,
-    ThermosTaskRunner,
-)
-from apache.aurora.executor.aurora_executor import AuroraExecutor
-from apache.thermos.common.path import TaskPath
-from apache.thermos.core.runner import TaskRunner
-from apache.thermos.monitoring.monitor import TaskMonitor
-
-from gen.apache.aurora.constants import AURORA_EXECUTOR_NAME
-from gen.apache.aurora.ttypes import (
-  AssignedTask,
-  ExecutorConfig,
-  Identity,
-  TaskConfig,
-)
-
-import mesos_pb2 as mesos_pb
+import mock
+from mesos.interface import mesos_pb2
 from thrift.TSerialization import serialize
 from twitter.common import log
 from twitter.common.contextutil import temporary_dir
@@ -64,6 +33,31 @@ from twitter.common.exceptions import ExceptionalThread
 from twitter.common.log.options import LogOptions
 from twitter.common.quantity import Amount, Time
 
+from apache.aurora.config.schema.base import (
+    MB,
+    HealthCheckConfig,
+    MesosJob,
+    MesosTaskInstance,
+    Process,
+    Resources,
+    Task
+)
+from apache.aurora.executor.aurora_executor import AuroraExecutor
+from apache.aurora.executor.common.executor_timeout import ExecutorTimeout
+from apache.aurora.executor.common.health_checker import HealthCheckerProvider
+from apache.aurora.executor.common.sandbox import DirectorySandbox, SandboxProvider
+from apache.aurora.executor.common.status_checker import ChainedStatusChecker
+from apache.aurora.executor.common.task_runner import TaskError
+from apache.aurora.executor.status_manager import StatusManager
+from apache.aurora.executor.thermos_task_runner import (
+    DefaultThermosTaskRunnerProvider,
+    ThermosTaskRunner
+)
+from apache.thermos.core.runner import TaskRunner
+from apache.thermos.monitoring.monitor import TaskMonitor
+
+from gen.apache.aurora.api.constants import AURORA_EXECUTOR_NAME
+from gen.apache.aurora.api.ttypes import AssignedTask, ExecutorConfig, Identity, JobKey, TaskConfig
 
 if 'THERMOS_DEBUG' in os.environ:
   LogOptions.set_stderr_log_level('google:DEBUG')
@@ -145,33 +139,34 @@ def make_task(thermos_config, assigned_ports={}, **kw):
           executorConfig=ExecutorConfig(
               name=AURORA_EXECUTOR_NAME,
               data=thermos_config.json_dumps()),
+          job=JobKey(role=role, environment='env', name='name'),
           owner=Identity(role=role, user=role)),
       assignedPorts=assigned_ports,
       **kw)
-  td = mesos_pb.TaskInfo()
+  td = mesos_pb2.TaskInfo()
   td.task_id.value = task_id
   td.name = thermos_config.task().name().get()
   td.data = serialize(at)
   return td
 
 
-BASE_MTI = MesosTaskInstance(instance = 0, role = getpass.getuser())
-BASE_TASK = Task(resources = Resources(cpu=1.0, ram=16*MB, disk=32*MB))
+BASE_MTI = MesosTaskInstance(instance=0, role=getpass.getuser())
+BASE_TASK = Task(resources=Resources(cpu=1.0, ram=16 * MB, disk=32 * MB))
 
 HELLO_WORLD_TASK_ID = 'hello_world-001'
 HELLO_WORLD = BASE_TASK(
-    name = 'hello_world',
-    processes = [Process(name = 'hello_world_{{thermos.task_id}}', cmdline = 'echo hello world')])
+    name='hello_world',
+    processes=[Process(name='hello_world_{{thermos.task_id}}', cmdline='echo hello world')])
 HELLO_WORLD_MTI = BASE_MTI(task=HELLO_WORLD)
 
-SLEEP60 = BASE_TASK(processes = [Process(name = 'sleep60', cmdline = 'sleep 60')])
-SLEEP2 = BASE_TASK(processes = [Process(name = 'sleep2', cmdline = 'sleep 2')])
+SLEEP60 = BASE_TASK(processes=[Process(name='sleep60', cmdline='sleep 60')])
+SLEEP2 = BASE_TASK(processes=[Process(name='sleep2', cmdline='sleep 2')])
 SLEEP60_MTI = BASE_MTI(task=SLEEP60)
 
 MESOS_JOB = MesosJob(
-  name = 'does_not_matter',
-  instances = 1,
-  role = getpass.getuser(),
+  name='does_not_matter',
+  instances=1,
+  role=getpass.getuser(),
 )
 
 
@@ -197,7 +192,7 @@ def make_executor(
   te = FastThermosExecutor(
       runner_provider=runner_provider,
       status_manager_class=status_manager_class,
-      sandbox_provider=DefaultTestSandboxProvider,
+      sandbox_provider=DefaultTestSandboxProvider(),
       status_providers=status_providers,
   )
 
@@ -206,10 +201,6 @@ def make_executor(
   te.launchTask(proxy_driver, task_description)
 
   te.status_manager_started.wait()
-  sampled_metrics = te.metrics.sample()
-  assert 'kill_manager.enabled' in sampled_metrics
-  for checker in te._chained_checker._status_checkers:  # hacky
-    assert ('%s.enabled' % checker.name()) in sampled_metrics
 
   while len(proxy_driver.method_calls['sendStatusUpdate']) < 2:
     time.sleep(0.1)
@@ -218,8 +209,8 @@ def make_executor(
   updates = proxy_driver.method_calls['sendStatusUpdate']
   assert len(updates) == 2
   status_updates = [arg_tuple[0][0] for arg_tuple in updates]
-  assert status_updates[0].state == mesos_pb.TASK_STARTING
-  assert status_updates[1].state == mesos_pb.TASK_RUNNING
+  assert status_updates[0].state == mesos_pb2.TASK_STARTING
+  assert status_updates[1].state == mesos_pb2.TASK_RUNNING
 
   # wait for the runner to bind to a task
   while True:
@@ -252,12 +243,15 @@ class SignalServer(ExceptionalThread):
     super(SignalServer, self).__init__()
     self.daemon = True
     self._stop = threading.Event()
+
   def run(self):
     while not self._stop.is_set():
       self._server.handle_request()
+
   def __enter__(self):
     self.start()
     return self._server.server_port
+
   def __exit__(self, exc_type, exc_val, traceback):
     self._stop.set()
 
@@ -273,8 +267,8 @@ class TestThermosExecutor(object):
     LogOptions.set_disk_log_level('DEBUG')
     log.init('executor_logger')
     if not cls.PANTS_BUILT and 'SKIP_PANTS_BUILD' not in os.environ:
-      assert subprocess.call(["./pants",
-          "src/main/python/apache/aurora/executor/bin:thermos_runner"]) == 0
+      assert subprocess.call(["./pants", "binary",
+          "src/main/python/apache/thermos/runner:thermos_runner"]) == 0
       cls.PANTS_BUILT = True
 
   @classmethod
@@ -290,10 +284,10 @@ class TestThermosExecutor(object):
     with temporary_dir() as tempdir:
       te = AuroraExecutor(
           runner_provider=make_provider(tempdir),
-          sandbox_provider=DefaultTestSandboxProvider)
+          sandbox_provider=DefaultTestSandboxProvider())
       te.launchTask(proxy_driver, make_task(HELLO_WORLD_MTI))
       te.terminated.wait()
-      tm = TaskMonitor(TaskPath(root=tempdir), task_id=HELLO_WORLD_TASK_ID)
+      tm = TaskMonitor(tempdir, task_id=HELLO_WORLD_TASK_ID)
       runner_state = tm.get_state()
 
     assert 'hello_world_hello_world-001' in runner_state.processes, (
@@ -302,9 +296,9 @@ class TestThermosExecutor(object):
     updates = proxy_driver.method_calls['sendStatusUpdate']
     assert len(updates) == 3
     status_updates = [arg_tuple[0][0] for arg_tuple in updates]
-    assert status_updates[0].state == mesos_pb.TASK_STARTING
-    assert status_updates[1].state == mesos_pb.TASK_RUNNING
-    assert status_updates[2].state == mesos_pb.TASK_FINISHED
+    assert status_updates[0].state == mesos_pb2.TASK_STARTING
+    assert status_updates[1].state == mesos_pb2.TASK_RUNNING
+    assert status_updates[2].state == mesos_pb2.TASK_FINISHED
 
   def test_basic_as_job(self):
     proxy_driver = ProxyDriver()
@@ -312,13 +306,13 @@ class TestThermosExecutor(object):
     with temporary_dir() as tempdir:
       te = AuroraExecutor(
           runner_provider=make_provider(tempdir),
-          sandbox_provider=DefaultTestSandboxProvider)
+          sandbox_provider=DefaultTestSandboxProvider())
       te.launchTask(proxy_driver, make_task(MESOS_JOB(task=HELLO_WORLD), instanceId=0))
       te.runner_started.wait()
       while te._status_manager is None:
         time.sleep(0.1)
       te.terminated.wait()
-      tm = TaskMonitor(TaskPath(root=tempdir), task_id=HELLO_WORLD_TASK_ID)
+      tm = TaskMonitor(tempdir, task_id=HELLO_WORLD_TASK_ID)
       runner_state = tm.get_state()
 
     assert 'hello_world_hello_world-001' in runner_state.processes, (
@@ -326,9 +320,9 @@ class TestThermosExecutor(object):
     updates = proxy_driver.method_calls['sendStatusUpdate']
     assert len(updates) == 3
     status_updates = [arg_tuple[0][0] for arg_tuple in updates]
-    assert status_updates[0].state == mesos_pb.TASK_STARTING
-    assert status_updates[1].state == mesos_pb.TASK_RUNNING
-    assert status_updates[2].state == mesos_pb.TASK_FINISHED
+    assert status_updates[0].state == mesos_pb2.TASK_STARTING
+    assert status_updates[1].state == mesos_pb2.TASK_RUNNING
+    assert status_updates[2].state == mesos_pb2.TASK_FINISHED
 
   def test_runner_disappears(self):
     proxy_driver = ProxyDriver()
@@ -344,7 +338,7 @@ class TestThermosExecutor(object):
 
     updates = proxy_driver.method_calls['sendStatusUpdate']
     assert len(updates) == 3
-    assert updates[-1][0][0].state == mesos_pb.TASK_LOST
+    assert updates[-1][0][0].state == mesos_pb2.TASK_KILLED
 
   def test_task_killed(self):
     proxy_driver = ProxyDriver()
@@ -356,21 +350,21 @@ class TestThermosExecutor(object):
 
     updates = proxy_driver.method_calls['sendStatusUpdate']
     assert len(updates) == 3
-    assert updates[-1][0][0].state == mesos_pb.TASK_KILLED
+    assert updates[-1][0][0].state == mesos_pb2.TASK_KILLED
 
-  def test_killTask(self):
+  def test_killTask(self):  # noqa
     proxy_driver = ProxyDriver()
 
     with temporary_dir() as checkpoint_root:
       _, executor = make_executor(proxy_driver, checkpoint_root, SLEEP60_MTI)
       # send two, expect at most one delivered
-      executor.killTask(proxy_driver, mesos_pb.TaskID(value='sleep60-001'))
-      executor.killTask(proxy_driver, mesos_pb.TaskID(value='sleep60-001'))
+      executor.killTask(proxy_driver, mesos_pb2.TaskID(value='sleep60-001'))
+      executor.killTask(proxy_driver, mesos_pb2.TaskID(value='sleep60-001'))
       executor.terminated.wait()
 
     updates = proxy_driver.method_calls['sendStatusUpdate']
     assert len(updates) == 3
-    assert updates[-1][0][0].state == mesos_pb.TASK_KILLED
+    assert updates[-1][0][0].state == mesos_pb2.TASK_KILLED
 
   def test_shutdown(self):
     proxy_driver = ProxyDriver()
@@ -382,36 +376,50 @@ class TestThermosExecutor(object):
 
     updates = proxy_driver.method_calls['sendStatusUpdate']
     assert len(updates) == 3
-    assert updates[-1][0][0].state == mesos_pb.TASK_KILLED
+    assert updates[-1][0][0].state == mesos_pb2.TASK_KILLED
 
-  def test_task_lost(self):
+  def test_shutdown_order(self):
     proxy_driver = ProxyDriver()
 
-    with temporary_dir() as checkpoint_root:
-      runner, executor = make_executor(proxy_driver, checkpoint_root, SLEEP60_MTI)
-      runner.lose(force=True)
+    with contextlib.nested(
+        temporary_dir(),
+        mock.patch.object(ChainedStatusChecker, 'stop'),
+        mock.patch.object(ThermosTaskRunner, 'stop')) as (
+            checkpoint_root,
+            status_check_stop,
+            runner_stop):
+
+      parent = mock.MagicMock()
+      parent.attach_mock(status_check_stop, 'status_check_stop')
+      parent.attach_mock(runner_stop, 'runner_stop')
+
+      _, executor = make_executor(proxy_driver,
+          checkpoint_root,
+          SLEEP60_MTI)
+      executor.shutdown(proxy_driver)
       executor.terminated.wait()
 
-    updates = proxy_driver.method_calls['sendStatusUpdate']
-    assert len(updates) == 3
-    assert updates[-1][0][0].state == mesos_pb.TASK_LOST
+      parent.assert_has_calls(
+          [mock.call.status_check_stop(), mock.call.runner_stop()],
+          any_order=False)
 
   def test_task_health_failed(self):
     proxy_driver = ProxyDriver()
     with SignalServer(UnhealthyHandler) as port:
       with temporary_dir() as checkpoint_root:
         health_check_config = HealthCheckConfig(initial_interval_secs=0.1, interval_secs=0.1)
-        _, executor = make_executor(proxy_driver,
-                                    checkpoint_root,
-                                    MESOS_JOB(task=SLEEP60, health_check_config=health_check_config),
-                                    ports={'health': port},
-                                    fast_status=True,
-                                    status_providers=(HealthCheckerProvider(),))
+        _, executor = make_executor(
+            proxy_driver,
+            checkpoint_root,
+            MESOS_JOB(task=SLEEP60, health_check_config=health_check_config),
+            ports={'health': port},
+            fast_status=True,
+            status_providers=(HealthCheckerProvider(),))
         executor.terminated.wait()
 
     updates = proxy_driver.method_calls['sendStatusUpdate']
     assert len(updates) == 3
-    assert updates[-1][0][0].state == mesos_pb.TASK_FAILED
+    assert updates[-1][0][0].state == mesos_pb2.TASK_FAILED
 
   def test_task_health_ok(self):
     proxy_driver = ProxyDriver()
@@ -428,7 +436,7 @@ class TestThermosExecutor(object):
 
     updates = proxy_driver.method_calls['sendStatusUpdate']
     assert len(updates) == 3
-    assert updates[-1][0][0].state == mesos_pb.TASK_FINISHED
+    assert updates[-1][0][0].state == mesos_pb2.TASK_FINISHED
 
   def test_failing_runner_start(self):
     proxy_driver = ProxyDriver()
@@ -437,12 +445,12 @@ class TestThermosExecutor(object):
       runner_provider = make_provider(td, FailingStartingTaskRunner)
       te = FastThermosExecutor(
           runner_provider=runner_provider,
-          sandbox_provider=DefaultTestSandboxProvider)
+          sandbox_provider=DefaultTestSandboxProvider())
       te.launchTask(proxy_driver, make_task(HELLO_WORLD_MTI))
       proxy_driver.wait_stopped()
 
       updates = proxy_driver.method_calls['sendStatusUpdate']
-      assert updates[-1][0][0].state == mesos_pb.TASK_FAILED
+      assert updates[-1][0][0].state == mesos_pb2.TASK_FAILED
 
   def test_failing_runner_initialize(self):
     proxy_driver = ProxyDriver()
@@ -450,12 +458,12 @@ class TestThermosExecutor(object):
     with temporary_dir() as td:
       te = FastThermosExecutor(
           runner_provider=make_provider(td),
-          sandbox_provider=FailingSandboxProvider)
+          sandbox_provider=FailingSandboxProvider())
       te.launchTask(proxy_driver, make_task(HELLO_WORLD_MTI))
       proxy_driver.wait_stopped()
 
       updates = proxy_driver.method_calls['sendStatusUpdate']
-      assert updates[-1][0][0].state == mesos_pb.TASK_FAILED
+      assert updates[-1][0][0].state == mesos_pb2.TASK_FAILED
 
   def test_slow_runner_initialize(self):
     proxy_driver = ProxyDriver()
@@ -465,18 +473,18 @@ class TestThermosExecutor(object):
     with temporary_dir() as td:
       te = FastThermosExecutor(
           runner_provider=make_provider(td),
-          sandbox_provider=SlowSandboxProvider)
+          sandbox_provider=SlowSandboxProvider())
       te.SANDBOX_INITIALIZATION_TIMEOUT = Amount(1, Time.MILLISECONDS)
       te.launchTask(proxy_driver, task)
       proxy_driver.wait_stopped()
 
       updates = proxy_driver.method_calls['sendStatusUpdate']
       assert len(updates) == 2
-      assert updates[-1][0][0].state == mesos_pb.TASK_FAILED
+      assert updates[-1][0][0].state == mesos_pb2.TASK_FAILED
 
       te._sandbox._init_start.set()
 
-  def test_killTask_during_runner_initialize(self):
+  def test_killTask_during_runner_initialize(self):  # noqa
     proxy_driver = ProxyDriver()
 
     task = make_task(HELLO_WORLD_MTI)
@@ -484,10 +492,10 @@ class TestThermosExecutor(object):
     with temporary_dir() as td:
       te = FastThermosExecutor(
           runner_provider=make_provider(td),
-          sandbox_provider=SlowSandboxProvider)
+          sandbox_provider=SlowSandboxProvider())
       te.launchTask(proxy_driver, task)
       te.sandbox_initialized.wait()
-      te.killTask(proxy_driver, mesos_pb.TaskID(value=task.task_id.value))
+      te.killTask(proxy_driver, mesos_pb2.TaskID(value=task.task_id.value))
       assert te.runner_aborted.is_set()
       assert not te.sandbox_created.is_set()
 
@@ -506,30 +514,31 @@ class TestThermosExecutor(object):
 
       updates = proxy_driver.method_calls['sendStatusUpdate']
       assert len(updates) == 2
-      assert updates[-1][0][0].state == mesos_pb.TASK_KILLED
+      assert updates[-1][0][0].state == mesos_pb2.TASK_KILLED
 
-  def test_launchTask_deserialization_fail(self):
+  def test_launchTask_deserialization_fail(self):  # noqa
     proxy_driver = ProxyDriver()
 
     role = getpass.getuser()
-    task_info = mesos_pb.TaskInfo()
+    task_info = mesos_pb2.TaskInfo()
     task_info.name = task_info.task_id.value = 'broken'
     task_info.data = serialize(
         AssignedTask(
             task=TaskConfig(
+                job=JobKey(role=role, environment='env', name='name'),
                 owner=Identity(role=role, user=role),
                 executorConfig=ExecutorConfig(name=AURORA_EXECUTOR_NAME, data='garbage'))))
 
     te = FastThermosExecutor(
         runner_provider=make_provider(safe_mkdtemp()),
-        sandbox_provider=DefaultTestSandboxProvider)
+        sandbox_provider=DefaultTestSandboxProvider())
     te.launchTask(proxy_driver, task_info)
     proxy_driver.wait_stopped()
 
     updates = proxy_driver.method_calls['sendStatusUpdate']
     assert len(updates) == 2
-    assert updates[0][0][0].state == mesos_pb.TASK_STARTING
-    assert updates[1][0][0].state == mesos_pb.TASK_FAILED
+    assert updates[0][0][0].state == mesos_pb2.TASK_STARTING
+    assert updates[1][0][0].state == mesos_pb2.TASK_FAILED
 
 
 def test_waiting_executor():
@@ -537,6 +546,6 @@ def test_waiting_executor():
   with temporary_dir() as checkpoint_root:
     te = AuroraExecutor(
         runner_provider=make_provider(checkpoint_root),
-        sandbox_provider=DefaultTestSandboxProvider)
+        sandbox_provider=DefaultTestSandboxProvider())
     ExecutorTimeout(te.launched, proxy_driver, timeout=Amount(100, Time.MILLISECONDS)).start()
     proxy_driver.wait_stopped()

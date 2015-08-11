@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -17,14 +15,22 @@
 python_test_suite(
   name = 'all',
   dependencies = [
-    pants(':bridge'),
-    pants(':help'),
-    pants(':job'),
-    pants(':logging'),
-    pants(':plugins'),
-    pants(':quota'),
-    pants(':sla'),
-    pants(':task'),
+    ':api',
+    ':client',
+    ':command_hooks',
+    ':context',
+    ':cron',
+    ':inspect',
+    ':job',
+    ':config',
+    ':options',
+    ':plugins',
+    ':quota',
+    ':sla',
+    ':task',
+    ':supdate',
+    ':update',
+    ':version',
   ]
 )
 
@@ -32,39 +38,76 @@ python_library(
   name = 'util',
   sources = [ 'util.py' ],
   dependencies = [
-    pants('3rdparty/python:mock'),
-    pants('src/main/python/apache/aurora/client/cli'),
+    '3rdparty/python:mock',
+    'src/main/python/apache/aurora/client',
+    'src/test/python/apache/aurora:api_util',
   ]
 )
 
 python_tests(
-  name = 'help',
-  sources = [ 'test_help.py' ],
+  name='inspect',
+  sources = [ 'test_inspect.py' ],
   dependencies = [
-    pants('3rdparty/python:mock'),
-    pants('3rdparty/python:twitter.common.contextutil'),
-    pants('src/main/python/apache/aurora/client/cli'),
-    pants('src/main/python/apache/aurora/client/cli:client'),
+    ':util',
+    '3rdparty/python:mock',
+    '3rdparty/python:twitter.common.contextutil',
+    'src/main/python/apache/aurora/client',
   ]
 )
 
 python_tests(
-  name = 'logging',
-  sources = [ 'test_logging.py' ],
+  name='supdate',
+  sources = [ 'test_supdate.py' ],
   dependencies = [
-    pants(':util'),
-    pants('3rdparty/python:mock'),
-    pants('3rdparty/python:twitter.common.contextutil'),
-    pants('src/main/python/apache/aurora/client/cli'),
-    pants('src/main/python/apache/aurora/client/cli:client'),
+    ':util',
+    '3rdparty/python:mock',
+    '3rdparty/python:twitter.common.contextutil',
+    'src/main/python/apache/aurora/client',
   ]
 )
 
 python_tests(
-  name = 'bridge',
-  sources = [ 'test_bridge.py' ],
+  name = 'command_hooks',
+  sources = [ 'test_command_hooks.py' ],
   dependencies = [
-    pants('src/main/python/apache/aurora/client/cli:bridge'),
+    ':util',
+    '3rdparty/python:mock',
+    '3rdparty/python:twitter.common.contextutil',
+    'src/main/python/apache/aurora/client',
+  ]
+)
+
+python_tests(
+  name = 'api',
+  sources = [ 'test_api_from_cli.py' ],
+  dependencies = [
+    ':util',
+    '3rdparty/python:mock',
+    '3rdparty/python:twitter.common.contextutil',
+    'src/main/python/apache/aurora/client',
+  ]
+)
+
+
+python_tests(
+  name = 'config',
+  sources = [ 'test_config_noun.py' ],
+  dependencies = [
+    ':util',
+    '3rdparty/python:mock',
+    '3rdparty/python:twitter.common.contextutil',
+    'src/main/python/apache/aurora/client',
+  ]
+)
+
+python_tests(
+  name='update',
+  sources=['test_update.py'],
+  dependencies = [
+    ':util',
+    '3rdparty/python:mock',
+    '3rdparty/python:twitter.common.contextutil',
+    'src/main/python/apache/aurora/client',
   ]
 )
 
@@ -75,30 +118,40 @@ python_tests(
     'test_create.py',
     'test_diff.py',
     'test_kill.py',
+    'test_open.py',
     'test_restart.py',
     'test_status.py',
-    'test_update.py',
   ],
   dependencies = [
-    pants(':util'),
-    pants('3rdparty/python:mock'),
-    pants('3rdparty/python:twitter.common.contextutil'),
-    pants('src/main/python/apache/aurora/client/cli'),
-    pants('src/main/python/apache/aurora/client/cli:client'),
-    pants('src/test/python/apache/aurora/client/commands:util')
+    ':util',
+    '3rdparty/python:mock',
+    '3rdparty/python:twitter.common.contextutil',
+    'src/main/python/apache/aurora/client',
   ]
 )
+
+python_tests(
+  name = 'cron',
+  sources = [
+    'test_cron.py',
+  ],
+  dependencies = [
+    ':util',
+    '3rdparty/python:mock',
+    '3rdparty/python:twitter.common.contextutil',
+    'src/main/python/apache/aurora/client',
+  ]
+)
+
 
 python_tests(
   name = 'quota',
   sources = [ 'test_quota.py' ],
   dependencies = [
-    pants(':util'),
-    pants('3rdparty/python:mock'),
-    pants('3rdparty/python:twitter.common.contextutil'),
-    pants('src/main/python/apache/aurora/client/cli'),
-    pants('src/main/python/apache/aurora/client/cli:client'),
-    pants('src/test/python/apache/aurora/client/commands:util')
+    ':util',
+    '3rdparty/python:mock',
+    '3rdparty/python:twitter.common.contextutil',
+    'src/main/python/apache/aurora/client',
   ]
 )
 
@@ -106,25 +159,21 @@ python_tests(
   name = 'sla',
   sources = [ 'test_sla.py' ],
   dependencies = [
-    pants(':util'),
-    pants('3rdparty/python:mock'),
-    pants('3rdparty/python:twitter.common.contextutil'),
-    pants('src/main/python/apache/aurora/client/cli'),
-    pants('src/main/python/apache/aurora/client/cli:client'),
-    pants('src/test/python/apache/aurora/client/commands:util')
+    ':util',
+    '3rdparty/python:mock',
+    '3rdparty/python:twitter.common.contextutil',
+    'src/main/python/apache/aurora/client',
   ]
 )
 
 python_tests(
   name='task',
-  sources = [ 'test_task_run.py'],
+  sources = [ 'test_task.py'],
   dependencies = [
-    pants(':util'),
-    pants('3rdparty/python:mock'),
-    pants('3rdparty/python:twitter.common.contextutil'),
-    pants('src/main/python/apache/aurora/client/cli'),
-    pants('src/main/python/apache/aurora/client/cli:client'),
-    pants('src/test/python/apache/aurora/client/commands:util')
+    ':util',
+    '3rdparty/python:mock',
+    '3rdparty/python:twitter.common.contextutil',
+    'src/main/python/apache/aurora/client',
   ]
 )
 
@@ -132,11 +181,43 @@ python_tests(
   name = 'plugins',
   sources = [ 'test_plugins.py' ],
   dependencies = [
-    pants(':util'),
-    pants('3rdparty/python:mock'),
-    pants('3rdparty/python:twitter.common.contextutil'),
-    pants('src/main/python/apache/aurora/client/cli'),
-    pants('src/main/python/apache/aurora/client/cli:client'),
-    pants('src/test/python/apache/aurora/client/commands:util')
+    ':util',
+    '3rdparty/python:mock',
+    '3rdparty/python:twitter.common.contextutil',
+    'src/main/python/apache/aurora/client',
+  ]
+)
+
+python_tests(
+  name = 'client',
+  sources = [ 'test_client.py' ],
+  dependencies = [
+    'src/main/python/apache/aurora/client',
+  ]
+)
+
+python_tests(
+  name = 'version',
+  sources = [ 'test_version.py' ],
+  dependencies = [
+    '3rdparty/python:mock',
+    'src/main/python/apache/aurora/client',
+  ]
+)
+
+python_tests(
+  name = 'context',
+  sources = [ 'test_context.py' ],
+  dependencies = [
+    '3rdparty/python:mock',
+    'src/main/python/apache/aurora/client',
+  ]
+)
+
+python_tests(
+  name = 'options',
+  sources = [ 'test_options.py' ],
+  dependencies = [
+    'src/main/python/apache/aurora/client',
   ]
 )

@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -15,26 +13,28 @@
 #
 
 import unittest
-
 from copy import deepcopy
 
-from apache.aurora.client.api.quota_check import CapacityRequest, QuotaCheck
+from mock import call, create_autospec, patch
 
-from gen.apache.aurora.AuroraSchedulerManager import Client as scheduler_client
-from gen.apache.aurora.ttypes import (
+from apache.aurora.client.api.quota_check import CapacityRequest, QuotaCheck, print_quota
+
+from ...api_util import SchedulerThriftApiSpec
+
+from gen.apache.aurora.api.ttypes import (
     GetQuotaResult,
     JobKey,
     ResourceAggregate,
     Response,
     ResponseCode,
-    Result)
-
-from mock import Mock
+    ResponseDetail,
+    Result
+)
 
 
 class QuotaCheckTest(unittest.TestCase):
   def setUp(self):
-    self._scheduler = Mock()
+    self._scheduler = create_autospec(spec=SchedulerThriftApiSpec, instance=True)
     self._quota_checker = QuotaCheck(self._scheduler)
     self._role = 'mesos'
     self._name = 'quotajob'
@@ -44,7 +44,7 @@ class QuotaCheckTest(unittest.TestCase):
   def mock_get_quota(self, allocated, consumed, response_code=None):
     response_code = ResponseCode.OK if response_code is None else response_code
 
-    resp = Response(responseCode=response_code, message='test')
+    resp = Response(responseCode=response_code, details=[ResponseDetail(message='test')])
     resp.result = Result(
         getQuotaResult=GetQuotaResult(
           quota=deepcopy(allocated), prodConsumption=deepcopy(consumed)))
@@ -110,3 +110,20 @@ class QuotaCheckTest(unittest.TestCase):
 
     self.mock_get_quota(allocated, consumed, response_code=ResponseCode.INVALID_REQUEST)
     self.assert_result(True, released, acquired, ResponseCode.INVALID_REQUEST)
+
+  @patch('apache.aurora.client.api.quota_check.print_quota', spec=print_quota)
+  def test_additional_quota_out(self, mock_print_quota):
+    allocated = ResourceAggregate(numCpus=50.0, ramMb=1000, diskMb=3000)
+    consumed = ResourceAggregate(numCpus=45.0, ramMb=900, diskMb=2900)
+    released = CapacityRequest(ResourceAggregate(numCpus=5.0, ramMb=100, diskMb=100))
+    acquired = CapacityRequest(ResourceAggregate(numCpus=11.0, ramMb=220, diskMb=200))
+    additional = ResourceAggregate(numCpus=1.0, ramMb=20, diskMb=0)
+
+    self.mock_get_quota(allocated, consumed)
+    self.assert_result(True, released, acquired, ResponseCode.INVALID_REQUEST)
+    assert mock_print_quota.mock_calls[:4] == [
+        call(allocated, 'Total allocated quota', self._role),
+        call(consumed, 'Consumed quota', self._role),
+        call((acquired - released).quota(), 'Requested', self._name),
+        call(additional, 'Additional quota required', self._role)
+    ]

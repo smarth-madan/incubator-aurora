@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,13 +12,11 @@
 # limitations under the License.
 #
 
-import json
 import pkgutil
-import textwrap
-
-from apache.aurora.config.schema import base as base_schema
 
 from pystachio.config import Config as PystachioConfig
+
+from apache.aurora.config.schema import base as base_schema
 
 
 class AuroraConfigLoader(PystachioConfig):
@@ -73,7 +69,7 @@ class AuroraConfigLoader(PystachioConfig):
 
   @classmethod
   def loads_json(cls, string):
-    return base_schema.Job(json.loads(string))
+    return base_schema.Job.json_loads(string)
 
 
 AuroraConfigLoader.flush_schemas()

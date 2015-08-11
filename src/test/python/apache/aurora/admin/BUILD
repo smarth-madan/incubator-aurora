@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,16 +14,61 @@
 
 python_test_suite(name = 'all',
   dependencies = [
-    pants(':host_maintenance'),
+    ':admin',
+    ':host_maintenance',
+    ':maintenance'
+  ],
+)
+
+python_tests(
+  name='admin',
+  sources = [
+    'test_admin.py',
+    'test_admin_sla.py',
+    'test_admin_util.py',
+  ],
+  dependencies = [
+    ':util',
+    '3rdparty/python:mock',
+    '3rdparty/python:twitter.common.contextutil',
+    'src/main/python/apache/aurora/admin',
+    'api/src/main/thrift/org/apache/aurora/gen',
   ],
 )
 
 python_tests(name = 'host_maintenance',
   sources = ['test_host_maintenance.py'],
   dependencies = [
-    pants('3rdparty/python:mock'),
-    pants('src/main/python/apache/aurora/common:cluster'),
-    pants('src/main/python/apache/aurora/admin:host_maintenance'),
-    pants('src/main/thrift/org/apache/aurora/gen:py-thrift'),
+    ':util',
+    '3rdparty/python:mock',
+    '3rdparty/python:twitter.common.log',
+    '3rdparty/python:twitter.common.quantity',
+    'src/main/python/apache/aurora/admin',
+    'src/main/python/apache/aurora/client',
+    'src/main/python/apache/aurora/common',
+    'api/src/main/thrift/org/apache/aurora/gen',
+  ],
+)
+
+python_tests(
+  name='maintenance',
+  sources = [
+    'test_maintenance.py',
+  ],
+  dependencies = [
+    ':util',
+    '3rdparty/python:mock',
+    'src/main/python/apache/aurora/admin',
+  ],
+)
+
+python_library(
+  name='util',
+  sources = [ 'util.py' ],
+  dependencies = [
+    '3rdparty/python:mock',
+    'api/src/main/thrift/org/apache/aurora/gen',
+    'src/main/python/apache/aurora/client',
+    'src/test/python/apache/aurora:api_util',
   ],
 )

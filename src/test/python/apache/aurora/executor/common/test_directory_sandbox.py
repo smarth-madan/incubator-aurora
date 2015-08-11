@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,12 +14,11 @@
 
 import os
 
-from apache.aurora.executor.common.sandbox import DirectorySandbox, SandboxInterface
-
-from twitter.common.contextutil import temporary_dir
-
 import mock
 import pytest
+from twitter.common.contextutil import temporary_dir
+
+from apache.aurora.executor.common.sandbox import DirectorySandbox
 
 
 def test_directory_sandbox():

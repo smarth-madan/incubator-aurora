@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -17,13 +15,13 @@ package org.apache.aurora.scheduler.log.mesos;
 
 import java.io.File;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import javax.inject.Singleton;
 
 import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.inject.PrivateModule;
 import com.google.inject.Provides;
@@ -98,7 +96,7 @@ public class MesosLogStreamModule extends PrivateModule {
   private final ClientConfig zkClientConfig;
 
   public MesosLogStreamModule(ClientConfig zkClientConfig) {
-    this.zkClientConfig = Preconditions.checkNotNull(zkClientConfig);
+    this.zkClientConfig = Objects.requireNonNull(zkClientConfig);
   }
 
   @Override

@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -24,6 +22,7 @@ import com.google.common.base.Predicate;
 import org.aopalliance.intercept.MethodInterceptor;
 import org.aopalliance.intercept.MethodInvocation;
 import org.apache.aurora.gen.ResponseCode;
+import org.apache.aurora.scheduler.thrift.Responses;
 
 /**
  * A method interceptor that blocks access to features based on a supplied predicate.
@@ -35,13 +34,13 @@ public class FeatureToggleInterceptor implements MethodInterceptor {
   @Override
   public Object invoke(MethodInvocation invocation) throws Throwable {
     Method method = invocation.getMethod();
-    if (!allowMethod.apply(method)) {
-      return Interceptors.properlyTypedResponse(
-          method,
+    if (allowMethod.apply(method)) {
+      return invocation.proceed();
+    } else {
+      return Responses.addMessage(
+          Responses.empty(),
           ResponseCode.ERROR,
           "The " + method.getName() + " feature is currently disabled on this scheduler.");
-    } else {
-      return invocation.proceed();
     }
   }
 }

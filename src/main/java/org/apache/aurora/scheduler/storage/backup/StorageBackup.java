@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,50 +13,54 @@
  */
 package org.apache.aurora.scheduler.storage.backup;
 
+import java.io.BufferedOutputStream;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.FilenameFilter;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javax.inject.Inject;
+import javax.inject.Qualifier;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Ordering;
 import com.google.common.io.Files;
-import com.google.inject.BindingAnnotation;
 import com.twitter.common.quantity.Amount;
 import com.twitter.common.quantity.Time;
 import com.twitter.common.stats.Stats;
 import com.twitter.common.util.Clock;
 
-import org.apache.aurora.codec.ThriftBinaryCodec;
-import org.apache.aurora.codec.ThriftBinaryCodec.CodingException;
 import org.apache.aurora.gen.storage.Snapshot;
 import org.apache.aurora.scheduler.storage.SnapshotStore;
+import org.apache.thrift.TException;
+import org.apache.thrift.protocol.TBinaryProtocol;
+import org.apache.thrift.protocol.TProtocol;
+import org.apache.thrift.transport.TIOStreamTransport;
+import org.apache.thrift.transport.TTransport;
 
 import static java.lang.annotation.ElementType.FIELD;
 import static java.lang.annotation.ElementType.METHOD;
 import static java.lang.annotation.ElementType.PARAMETER;
 import static java.lang.annotation.RetentionPolicy.RUNTIME;
-
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
 
 /**
  * A backup routine that layers over a snapshot store and periodically writes snapshots to
  * local disk.
- *
- * TODO(William Farner): Perform backups asynchronously.  As written, they are performed in a
- * blocking write operation, which is asking for trouble.
  */
 public interface StorageBackup {
 
@@ -79,9 +81,9 @@ public interface StorageBackup {
       private final Amount<Long, Time> interval;
 
       BackupConfig(File dir, int maxBackups, Amount<Long, Time> interval) {
-        this.dir = checkNotNull(dir);
+        this.dir = requireNonNull(dir);
         this.maxBackups = maxBackups;
-        this.interval = checkNotNull(interval);
+        this.interval = requireNonNull(interval);
       }
 
       @VisibleForTesting
@@ -93,7 +95,7 @@ public interface StorageBackup {
     /**
      * Binding annotation that the underlying {@link SnapshotStore} must be bound with.
      */
-    @BindingAnnotation
+    @Qualifier
     @Target({FIELD, PARAMETER, METHOD}) @Retention(RUNTIME)
     @interface SnapshotDelegate { }
 
@@ -102,6 +104,7 @@ public interface StorageBackup {
     private final long backupIntervalMs;
     private volatile long lastBackupMs;
     private final DateFormat backupDateFormat;
+    private final Executor executor;
 
     private final AtomicLong successes = Stats.exportLong("scheduler_backup_success");
     @VisibleForTesting
@@ -119,21 +122,28 @@ public interface StorageBackup {
     StorageBackupImpl(
         @SnapshotDelegate SnapshotStore<Snapshot> delegate,
         Clock clock,
-        BackupConfig config) {
+        BackupConfig config,
+        Executor executor) {
 
-      this.delegate = checkNotNull(delegate);
-      this.clock = checkNotNull(clock);
-      this.config = checkNotNull(config);
-      backupDateFormat = new SimpleDateFormat("yyyy-MM-dd-HH-mm");
+      this.delegate = requireNonNull(delegate);
+      this.clock = requireNonNull(clock);
+      this.config = requireNonNull(config);
+      this.executor = requireNonNull(executor);
+      backupDateFormat = new SimpleDateFormat("yyyy-MM-dd-HH-mm", Locale.ENGLISH);
       backupIntervalMs = config.interval.as(Time.MILLISECONDS);
       lastBackupMs = clock.nowMillis();
     }
 
     @Override
     public Snapshot createSnapshot() {
-      Snapshot snapshot = delegate.createSnapshot();
+      final Snapshot snapshot = delegate.createSnapshot();
       if (clock.nowMillis() >= (lastBackupMs + backupIntervalMs)) {
-        save(snapshot);
+        executor.execute(new Runnable() {
+          @Override
+          public void run() {
+            save(snapshot);
+          }
+        });
       }
       return snapshot;
     }
@@ -155,21 +165,24 @@ public interface StorageBackup {
       String tempBackupName = "temp_" + backupName;
       File tempFile = new File(config.dir, tempBackupName);
       LOG.info("Saving backup to " + tempFile);
-      try {
-        byte[] backup = ThriftBinaryCodec.encodeNonNull(snapshot);
-        Files.write(backup, tempFile);
+      try (
+          OutputStream tempFileStream = new BufferedOutputStream(new FileOutputStream(tempFile))) {
+
+        TTransport transport = new TIOStreamTransport(tempFileStream);
+        TProtocol protocol = new TBinaryProtocol(transport);
+        snapshot.write(protocol);
         Files.move(tempFile, new File(config.dir, backupName));
         successes.incrementAndGet();
       } catch (IOException e) {
         failures.incrementAndGet();
         LOG.log(Level.SEVERE, "Failed to prepare backup " + backupName + ": " + e, e);
-      } catch (CodingException e) {
+      } catch (TException e) {
         LOG.log(Level.SEVERE, "Failed to encode backup " + backupName + ": " + e, e);
         failures.incrementAndGet();
       } finally {
         if (tempFile.exists()) {
           LOG.info("Deleting incomplete backup file " + tempFile);
-          tempFile.delete();
+          tryDelete(tempFile);
         }
       }
 
@@ -184,9 +197,15 @@ public interface StorageBackup {
               .sortedCopy(ImmutableList.copyOf(backups)).subList(0, backupsToDelete);
           LOG.info("Deleting " + backupsToDelete + " outdated backups: " + toDelete);
           for (File outdated : toDelete) {
-            outdated.delete();
+            tryDelete(outdated);
           }
         }
+      }
+    }
+
+    private void tryDelete(File fileToDelete) {
+      if (!fileToDelete.delete()) {
+        LOG.severe("Failed to delete file: " + fileToDelete.getName());
       }
     }
 

@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -15,16 +13,20 @@
 #
 
 import pytest
+
 from apache.thermos.common.planner import Planner
 
 
 def details(planner):
   return planner.runnable, planner.running, planner.finished
 
-def _(*processes):
+
+def _(*processes):  # noqa
   return set(processes)
 
+
 empty = set()
+
 
 def test_planner_empty():
   p = Planner(set(), {})

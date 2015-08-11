@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -22,9 +20,7 @@ import java.util.Set;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
-import com.google.common.base.Functions;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
@@ -53,71 +49,25 @@ public final class Tasks {
           .addAll(apiConstants.ACTIVE_STATES)
           .build();
 
-  public static final Function<IScheduledTask, IAssignedTask> SCHEDULED_TO_ASSIGNED =
-      new Function<IScheduledTask, IAssignedTask>() {
-        @Override
-        public IAssignedTask apply(IScheduledTask task) {
-          return task.getAssignedTask();
-        }
-      };
+  public static ITaskConfig getConfig(IScheduledTask scheduledTask) {
+    return scheduledTask.getAssignedTask().getTask();
+  }
 
-  public static final Function<IAssignedTask, ITaskConfig> ASSIGNED_TO_INFO =
-      new Function<IAssignedTask, ITaskConfig>() {
-        @Override
-        public ITaskConfig apply(IAssignedTask task) {
-          return task.getTask();
-        }
-      };
+  public static int getInstanceId(IScheduledTask scheduledTask) {
+    return scheduledTask.getAssignedTask().getInstanceId();
+  }
 
-  public static final Function<IScheduledTask, ITaskConfig> SCHEDULED_TO_INFO =
-      Functions.compose(ASSIGNED_TO_INFO, SCHEDULED_TO_ASSIGNED);
+  public static IJobKey getJob(IAssignedTask assignedTask) {
+    return assignedTask.getTask().getJob();
+  }
 
-  public static final Function<IAssignedTask, String> ASSIGNED_TO_ID =
-      new Function<IAssignedTask, String>() {
-        @Override
-        public String apply(IAssignedTask task) {
-          return task.getTaskId();
-        }
-      };
+  public static IJobKey getJob(IScheduledTask scheduledTask) {
+    return getJob(scheduledTask.getAssignedTask());
+  }
 
-  public static final Function<IScheduledTask, String> SCHEDULED_TO_ID =
-      Functions.compose(ASSIGNED_TO_ID, SCHEDULED_TO_ASSIGNED);
-
-  public static final Function<IAssignedTask, Integer> ASSIGNED_TO_INSTANCE_ID =
-      new Function<IAssignedTask, Integer>() {
-        @Override
-        public Integer apply(IAssignedTask task) {
-          return task.getInstanceId();
-        }
-      };
-
-  public static final Function<IScheduledTask, Integer> SCHEDULED_TO_INSTANCE_ID =
-      Functions.compose(ASSIGNED_TO_INSTANCE_ID, SCHEDULED_TO_ASSIGNED);
-
-  public static final Function<ITaskConfig, IJobKey> INFO_TO_JOB_KEY =
-      new Function<ITaskConfig, IJobKey>() {
-        @Override
-        public IJobKey apply(ITaskConfig task) {
-          return JobKeys.from(task);
-        }
-      };
-
-  public static final Function<IAssignedTask, IJobKey> ASSIGNED_TO_JOB_KEY =
-      Functions.compose(INFO_TO_JOB_KEY, ASSIGNED_TO_INFO);
-
-  public static final Function<IScheduledTask, IJobKey> SCHEDULED_TO_JOB_KEY =
-      Functions.compose(ASSIGNED_TO_JOB_KEY, SCHEDULED_TO_ASSIGNED);
-
-  public static final Function<IAssignedTask, String> ASSIGNED_TO_SLAVE_HOST =
-      new Function<IAssignedTask, String>() {
-        @Override
-        public String apply(IAssignedTask task) {
-          return task.getSlaveHost();
-        }
-      };
-
-  public static final Function<IScheduledTask, String> SCHEDULED_TO_SLAVE_HOST =
-      Functions.compose(ASSIGNED_TO_SLAVE_HOST, SCHEDULED_TO_ASSIGNED);
+  public static String scheduledToSlaveHost(IScheduledTask scheduledTask) {
+    return scheduledTask.getAssignedTask().getSlaveHost();
+  }
 
   /**
    * Different states that an active task may be in.
@@ -137,31 +87,6 @@ public final class Tasks {
   public static final Set<ScheduleStatus> SLAVE_ASSIGNED_STATES =
       EnumSet.copyOf(apiConstants.SLAVE_ASSIGNED_STATES);
 
-  public static final Predicate<ITaskConfig> IS_PRODUCTION =
-      new Predicate<ITaskConfig>() {
-        @Override
-        public boolean apply(ITaskConfig task) {
-          return task.isProduction();
-        }
-      };
-
-  public static final Function<IScheduledTask, ScheduleStatus> GET_STATUS =
-      new Function<IScheduledTask, ScheduleStatus>() {
-        @Override
-        public ScheduleStatus apply(IScheduledTask task) {
-          return task.getStatus();
-        }
-      };
-
-  /**
-   * Order by production flag (true, then false), subsorting by task ID.
-   * TODO(Suman Karumuri): Move this call into SchedulerThriftInterface once SchedulerzRole is gone.
-   */
-  public static final Ordering<IAssignedTask> SCHEDULING_ORDER =
-      Ordering.explicit(true, false)
-          .onResultOf(Functions.compose(Functions.forPredicate(IS_PRODUCTION), ASSIGNED_TO_INFO))
-          .compound(Ordering.natural().onResultOf(ASSIGNED_TO_ID));
-
   private Tasks() {
     // Utility class.
   }
@@ -173,7 +98,7 @@ public final class Tasks {
    * @return A multi-map of tasks keyed by job key.
    */
   public static Multimap<IJobKey, IScheduledTask> byJobKey(Iterable<IScheduledTask> tasks) {
-    return Multimaps.index(tasks, Tasks.SCHEDULED_TO_JOB_KEY);
+    return Multimaps.index(tasks, Tasks::getJob);
   }
 
   public static boolean isActive(ScheduleStatus status) {
@@ -194,7 +119,7 @@ public final class Tasks {
   }
 
   public static Set<String> ids(Iterable<IScheduledTask> tasks) {
-    return ImmutableSet.copyOf(Iterables.transform(tasks, SCHEDULED_TO_ID));
+    return ImmutableSet.copyOf(Iterables.transform(tasks, Tasks::id));
   }
 
   public static Set<String> ids(IScheduledTask... tasks) {
@@ -202,15 +127,7 @@ public final class Tasks {
   }
 
   public static Map<String, IScheduledTask> mapById(Iterable<IScheduledTask> tasks) {
-    return Maps.uniqueIndex(tasks, SCHEDULED_TO_ID);
-  }
-
-  public static String getRole(IScheduledTask task) {
-    return task.getAssignedTask().getTask().getOwner().getRole();
-  }
-
-  public static String getJob(IScheduledTask task) {
-    return task.getAssignedTask().getTask().getJobName();
+    return Maps.uniqueIndex(tasks, Tasks::id);
   }
 
   /**
@@ -223,7 +140,7 @@ public final class Tasks {
     Preconditions.checkArgument(Iterables.size(tasks) != 0);
 
     return Ordering.explicit(ORDERED_TASK_STATUSES)
-        .onResultOf(GET_STATUS)
+        .onResultOf(IScheduledTask::getStatus)
         .compound(LATEST_ACTIVITY)
         .max(tasks);
   }

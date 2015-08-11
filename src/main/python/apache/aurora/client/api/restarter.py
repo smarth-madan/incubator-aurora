@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,13 +12,15 @@
 # limitations under the License.
 #
 
-from gen.apache.aurora.constants import ACTIVE_STATES
-from gen.apache.aurora.ttypes import ResponseCode
+from twitter.common import log
+
+from apache.aurora.client.base import combine_messages
 
 from .instance_watcher import InstanceWatcher
 from .updater_util import FailureThreshold
 
-from twitter.common import log
+from gen.apache.aurora.api.constants import ACTIVE_STATES
+from gen.apache.aurora.api.ttypes import ResponseCode
 
 
 class Restarter(object):
@@ -44,18 +44,18 @@ class Restarter(object):
         health_check_interval_seconds)
 
   def restart(self, instances):
+    # Verify that this operates on a valid job.
+    query = self._job_key.to_thrift_query()
+    query.statuses = ACTIVE_STATES
+    status = self._scheduler.getTasksWithoutConfigs(query)
+    if status.responseCode != ResponseCode.OK:
+      return status
+
     failure_threshold = FailureThreshold(
         self._update_config.max_per_instance_failures,
         self._update_config.max_total_failures)
 
     if not instances:
-      query = self._job_key.to_thrift_query()
-      query.statuses = ACTIVE_STATES
-      status = self._scheduler.getTasksStatus(query)
-
-      if status.responseCode != ResponseCode.OK:
-        return status
-
       tasks = status.result.scheduleStatusResult.tasks
 
       instances = sorted(task.assignedTask.instanceId for task in tasks)
@@ -74,7 +74,7 @@ class Restarter(object):
 
       resp = self._scheduler.restartShards(self._job_key.to_thrift(), batch, self._lock)
       if resp.responseCode != ResponseCode.OK:
-        log.error('Error restarting instances: %s', resp.message)
+        log.error('Error restarting instances: %s', combine_messages(resp))
         return resp
 
       failed_instances = self._instance_watcher.watch(batch)

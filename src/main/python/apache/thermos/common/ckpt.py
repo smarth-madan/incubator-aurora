@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -24,24 +22,24 @@ Task state machines.
 
 """
 
-import os
-
-from gen.apache.thermos.ttypes import (
-  ProcessState,
-  ProcessStatus,
-  RunnerCkpt,
-  RunnerState,
-  TaskState,
-)
-
 from twitter.common import log
 from twitter.common.recordio import RecordIO, ThriftRecordReader
+
+from gen.apache.thermos.ttypes import (
+    ProcessState,
+    ProcessStatus,
+    RunnerCkpt,
+    RunnerState,
+    TaskState
+)
+
 
 class UniversalStateHandler(object):
   """
     Generic interface for a handler to be called on any process/state transition, and at task
     initialization
   """
+
   def on_process_transition(self, state, process_update):
     pass
 
@@ -58,14 +56,15 @@ class ProcessStateHandler(object):
 
     () - starting state, [] - terminal state
 
-                             [FAILED]
-                                ^
-                                |
+      .--------------------> [FAILED]
+      |                         ^
+      |                         |
   (WAITING) ----> FORKED ----> RUNNING -----> [KILLED]
                     |          |    |
                     v          |    `---> [SUCCESS]
                  [LOST] <------'
   """
+
   def on_waiting(self, process_update):
     pass
 
@@ -140,7 +139,7 @@ def assert_nonempty(state, fields):
     assert getattr(state, field, None) is not None, "Missing field %s from %s!" % (field, state)
 
 
-def copy_fields(state, state_update, fields):
+def copy_fields(state, state_update, *fields):
   assert_nonempty(state_update, fields)
   for field in fields:
     setattr(state, field, getattr(state_update, field))
@@ -248,51 +247,48 @@ class CheckpointDispatcher(object):
               ProcessState._VALUES_TO_NAMES.get(process_state.state),
               ProcessState._VALUES_TO_NAMES.get(process_state_update.state)))
 
+    # always copy sequence id and state
+    copy_fields(process_state, process_state_update, 'seq')
+
     # CREATION => WAITING
     if process_state_update.state == ProcessState.WAITING:
       assert_process_state_in(None)
-      required_fields = ['seq', 'state', 'process']
-      copy_fields(process_state, process_state_update, required_fields)
+      copy_fields(process_state, process_state_update, 'state', 'process')
 
     # WAITING => FORKED
     elif process_state_update.state == ProcessState.FORKED:
       assert_process_state_in(ProcessState.WAITING)
-      required_fields = ['seq', 'state', 'fork_time', 'coordinator_pid']
-      copy_fields(process_state, process_state_update, required_fields)
+      copy_fields(process_state, process_state_update, 'state', 'fork_time', 'coordinator_pid')
 
     # FORKED => RUNNING
     elif process_state_update.state == ProcessState.RUNNING:
       assert_process_state_in(ProcessState.FORKED)
-      required_fields = ['seq', 'state', 'start_time', 'pid']
-      copy_fields(process_state, process_state_update, required_fields)
+      copy_fields(process_state, process_state_update, 'state', 'start_time', 'pid')
 
     # RUNNING => SUCCESS
     elif process_state_update.state == ProcessState.SUCCESS:
       assert_process_state_in(ProcessState.RUNNING)
-      required_fields = ['seq', 'state', 'stop_time', 'return_code']
-      copy_fields(process_state, process_state_update, required_fields)
+      copy_fields(process_state, process_state_update, 'state', 'stop_time', 'return_code')
 
-    # RUNNING => FAILED
+    # {WAITING, RUNNING} => FAILED
     elif process_state_update.state == ProcessState.FAILED:
-      assert_process_state_in(ProcessState.RUNNING)
-      required_fields = ['seq', 'state', 'stop_time', 'return_code']
-      copy_fields(process_state, process_state_update, required_fields)
+      assert_process_state_in(ProcessState.WAITING, ProcessState.RUNNING)
+      if process_state_update.state == ProcessState.RUNNING:
+        copy_fields(process_state, process_state_update, 'stop_time', 'return_code')
+      copy_fields(process_state, process_state_update, 'state')
 
     # {FORKED, RUNNING} => KILLED
     elif process_state_update.state == ProcessState.KILLED:
       assert_process_state_in(ProcessState.FORKED, ProcessState.RUNNING)
-      required_fields = ['seq', 'state', 'stop_time', 'return_code']
-      copy_fields(process_state, process_state_update, required_fields)
+      copy_fields(process_state, process_state_update, 'state', 'stop_time', 'return_code')
 
     # {FORKED, RUNNING} => LOST
     elif process_state_update.state == ProcessState.LOST:
       assert_process_state_in(ProcessState.FORKED, ProcessState.RUNNING)
-      required_fields = ['seq', 'state']
-      copy_fields(process_state, process_state_update, required_fields)
+      copy_fields(process_state, process_state_update, 'state')
 
     else:
-      raise cls.ErrorRecoveringState(
-        "Unknown state = %s" % process_state_update.state)
+      raise cls.ErrorRecoveringState("Unknown state = %s" % process_state_update.state)
 
   def would_update(self, state, runner_ckpt):
     """
@@ -302,7 +298,7 @@ class CheckpointDispatcher(object):
     if process_update is None:
       return False
     process = process_update.process
-    if process not in state.processes: # never seen before
+    if process not in state.processes:  # never seen before
       return True
     else:
       # if this sequence number is ahead of the current high water mark, it would

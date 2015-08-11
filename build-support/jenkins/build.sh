@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,12 +14,27 @@
 #
 
 # Jenkins build script used with builds at http://builds.apache.org
-set -ex
+set -eux
 date
 
 # Run all Java tests
-./gradlew clean build
+./gradlew -Pq clean build
+
+# Pre-fetch python dependencies. This is to avoid build flakiness introduced by
+# the resolver used in pants.
+export PIP_DEFAULT_TIMEOUT=60
+mkdir -p third_party
+# We omit mesos.native here since we don't actually build or use it in our unit tests.
+python -m pip install -d third_party -r <(grep -v mesos.native 3rdparty/python/requirements.txt)
+
+# Run Python style checks
+./build-support/python/isort-check
+./build-support/python/checkstyle-check src
 
 # Run all Python tests
-./pants src/test/python:all -vxs
+export JUNIT_XML_BASE="$PWD/dist/test-results"
+mkdir -p "$JUNIT_XML_BASE"
+./pants test.pytest --no-fast --options='-v' src/test/python::
 
+# Ensure we can build python sdists (AURORA-1174)
+./build-support/release/make-python-sdists

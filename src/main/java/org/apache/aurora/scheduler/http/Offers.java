@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,6 +14,7 @@
 package org.apache.aurora.scheduler.http;
 
 import java.util.Map;
+import java.util.Objects;
 
 import javax.inject.Inject;
 import javax.ws.rs.GET;
@@ -25,16 +24,17 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
 import com.google.common.base.Function;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableMap;
 
-import org.apache.aurora.scheduler.async.OfferQueue;
+import org.apache.aurora.scheduler.HostOffer;
+import org.apache.aurora.scheduler.offers.OfferManager;
 import org.apache.mesos.Protos.Attribute;
 import org.apache.mesos.Protos.ExecutorID;
-import org.apache.mesos.Protos.Offer;
 import org.apache.mesos.Protos.Resource;
 import org.apache.mesos.Protos.Value.Range;
+
+import static org.apache.mesos.Protos.Offer;
 
 /**
  * Servlet that exposes resource offers that the scheduler is currently retaining.
@@ -42,11 +42,11 @@ import org.apache.mesos.Protos.Value.Range;
 @Path("/offers")
 public class Offers {
 
-  private final OfferQueue offerQueue;
+  private final OfferManager offerManager;
 
   @Inject
-  Offers(OfferQueue offerQueue) {
-    this.offerQueue = Preconditions.checkNotNull(offerQueue);
+  Offers(OfferManager offerManager) {
+    this.offerManager = Objects.requireNonNull(offerManager);
   }
 
   /**
@@ -58,7 +58,7 @@ public class Offers {
   @Produces(MediaType.APPLICATION_JSON)
   public Response getOffers() {
     return Response.ok(
-        FluentIterable.from(offerQueue.getOffers()).transform(TO_BEAN).toList()).build();
+        FluentIterable.from(offerManager.getOffers()).transform(TO_BEAN).toList()).build();
   }
 
   private static final Function<ExecutorID, String> EXECUTOR_ID_TOSTRING =
@@ -121,10 +121,11 @@ public class Offers {
     return FluentIterable.from(iterable).transform(transform).toList();
   }
 
-  private static final Function<Offer, Map<String, ?>> TO_BEAN =
-      new Function<Offer, Map<String, ?>>() {
+  private static final Function<HostOffer, Map<String, ?>> TO_BEAN =
+      new Function<HostOffer, Map<String, ?>>() {
         @Override
-        public Map<String, ?> apply(Offer offer) {
+        public Map<String, ?> apply(HostOffer hostOffer) {
+          Offer offer = hostOffer.getOffer();
           return ImmutableMap.<String, Object>builder()
               .put("id", offer.getId().getValue())
               .put("framework_id", offer.getFrameworkId().getValue())

@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -20,10 +18,12 @@ import java.util.Set;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
 
-import org.apache.aurora.gen.Attribute;
-import org.apache.aurora.gen.HostAttributes;
 import org.apache.aurora.gen.MaintenanceMode;
+import org.apache.aurora.scheduler.base.Conversions;
 import org.apache.aurora.scheduler.storage.Storage.StoreProvider;
+import org.apache.aurora.scheduler.storage.entities.IAttribute;
+import org.apache.aurora.scheduler.storage.entities.IHostAttributes;
+import org.apache.mesos.Protos;
 
 /**
  * Storage interface for host attributes.
@@ -31,24 +31,31 @@ import org.apache.aurora.scheduler.storage.Storage.StoreProvider;
 public interface AttributeStore {
   /**
    * Fetches all host attributes given by the host.
+   * <p>
+   * TODO(wfarner): We need to transition this API to key off slave ID instead of host name, as
+   * the host is not guaranteed to be unique (it's possible, and sometimes desirable to have
+   * multiple slaves on a machine).  The current API ripples down into storage, since the store
+   * is not in the position to dictate behavior when host names collide.  Most callers seem to have
+   * sufficient context to use slave ID instead, with the exception of those related to host
+   * maintenance.
    *
    * @param host host name.
    * @return attributes associated with {@code host}, if the host is known.
    */
-  Optional<HostAttributes> getHostAttributes(String host);
+  Optional<IHostAttributes> getHostAttributes(String host);
 
   /**
    * Fetches all attributes in the store.
    *
    * @return All host attributes.
    */
-  Set<HostAttributes> getHostAttributes();
+  Set<IHostAttributes> getHostAttributes();
 
   /**
    * Attributes are considered mostly ephemeral and extremely low risk when inconsistency
    * is present.
    */
-  public interface Mutable extends AttributeStore {
+  interface Mutable extends AttributeStore {
 
     /**
      * Deletes all attributes in the store.
@@ -59,22 +66,13 @@ public interface AttributeStore {
      * Save a host attribute in the attribute store.
      *
      * @param hostAttributes The attribute we are going to save.
+     * @return {@code true} if the operation changed the attributes stored for the given
+     *         {@link IHostAttributes#getHost() host}, or {@code false} if the save was a no-op.
      */
-    void saveHostAttributes(HostAttributes hostAttributes);
-
-    /**
-     * Adjusts the maintenance mode for a host.
-     * No adjustment will be made if the host is unknown.
-     *
-     * @param host Host to adjust.
-     * @param mode Mode to place the host in.
-     * @return {@code true} if the host is known and the state was adjusted,
-     *         {@code false} if the host is unrecognized.
-     */
-    boolean setMaintenanceMode(String host, MaintenanceMode mode);
+    boolean saveHostAttributes(IHostAttributes hostAttributes);
   }
 
-  public static final class Util {
+  final class Util {
     private Util() {
     }
 
@@ -86,11 +84,48 @@ public interface AttributeStore {
      * @return Attributes associated with {@code host}, or an empty iterable if the host is
      *         unknown.
      */
-    public static Iterable<Attribute> attributesOrNone(StoreProvider store, String host) {
-      Optional<HostAttributes> attributes = store.getAttributeStore().getHostAttributes(host);
+    public static Iterable<IAttribute> attributesOrNone(StoreProvider store, String host) {
+      Optional<IHostAttributes> attributes = store.getAttributeStore().getHostAttributes(host);
       return attributes.isPresent()
-          ? attributes.get().getAttributes() : ImmutableList.<Attribute>of();
+          ? attributes.get().getAttributes() : ImmutableList.of();
+    }
+
+    /**
+     * Merges a desired maintenance mode with the existing attributes of a host, if present.
+     *
+     * @param store The store to fetch existing attributes from.
+     * @param host The host to merge existing attributes from.
+     * @param mode Maintenance mode to save if the host is known.
+     * @return The attributes that should be saved if there were already attributes stored for
+     *         the {@code host}, or {@link Optional#absent() none} if the host is unknown and
+     *         attributes should not be saved.
+     */
+    public static Optional<IHostAttributes> mergeMode(
+        AttributeStore store,
+        String host,
+        MaintenanceMode mode) {
+
+      Optional<IHostAttributes> stored = store.getHostAttributes(host);
+      if (stored.isPresent()) {
+        return Optional.of(IHostAttributes.build(stored.get().newBuilder().setMode(mode)));
+      } else {
+        return Optional.absent();
+      }
+    }
+
+    /**
+     * Merges the attributes from an offer, applying the default maintenance mode.
+     *
+     * @param store Store to fetch the existing maintenance mode for this host.
+     * @param offer Offer to merge.
+     * @return attributes from {@code offer} and the existing (or default) maintenance mode.
+     */
+    public static IHostAttributes mergeOffer(AttributeStore store, Protos.Offer offer) {
+      IHostAttributes fromOffer = Conversions.getAttributes(offer);
+      MaintenanceMode mode = store.getHostAttributes(fromOffer.getHost())
+          .transform(IHostAttributes::getMode)
+          .or(MaintenanceMode.NONE);
+      return IHostAttributes.build(fromOffer.newBuilder().setMode(mode));
     }
   }
-
 }

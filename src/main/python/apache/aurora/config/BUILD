@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -13,42 +11,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
 import os
 
-# Alias for src/main/python/apache/aurora/config/schema
-python_library(
-  name = 'schema',
-  dependencies = [
-    pants('src/main/python/apache/aurora/config/schema'),
-  ]
-)
 
 python_library(
   name = 'config',
-  sources = (
-    '__init__.py',
-    'loader.py',
-    'port_resolver.py',
-    'thrift.py',
-  ),
+  sources = rglobs('*.py'),
   dependencies = [
-    pants('3rdparty/python:pystachio'),
-    pants('3rdparty/python:twitter.common.lang'),
-    pants('src/main/python/apache/aurora/common'),
-    pants('src/main/python/apache/aurora/config/schema'),
-    pants('src/main/thrift/org/apache/aurora/gen:py-thrift'),
-  ],
-
-)
-
-python_library(
-  name = 'config-packaged',
-  dependencies = [
-    pants(':config'),
-
-    # covering dependencies
-    pants('src/main/python/apache/thermos/config'),
+    '3rdparty/python:pystachio',
+    '3rdparty/python:twitter.common.lang',
+    'api/src/main/thrift/org/apache/aurora/gen',
+    'src/main/python/apache/aurora/common',
+    'src/main/python/apache/thermos/config',
   ],
   provides = setup_py(
     name = 'apache.aurora.config',

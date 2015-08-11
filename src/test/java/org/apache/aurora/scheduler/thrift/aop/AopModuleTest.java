@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -37,6 +35,7 @@ import org.junit.Test;
 
 import static org.easymock.EasyMock.expect;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 
 public class AopModuleTest extends EasyMockTest {
@@ -44,7 +43,7 @@ public class AopModuleTest extends EasyMockTest {
   private static final SessionKey SESSION_KEY = new SessionKey();
 
   private CapabilityValidator capabilityValidator;
-  private Iface mockThrift;
+  private AnnotatedAuroraAdmin mockThrift;
 
   @Before
   public void setUp() throws Exception {
@@ -52,7 +51,7 @@ public class AopModuleTest extends EasyMockTest {
     expect(capabilityValidator.toString(SESSION_KEY))
         .andReturn("user")
         .anyTimes();
-    mockThrift = createMock(Iface.class);
+    mockThrift = createMock(AnnotatedAuroraAdmin.class);
   }
 
   private Iface getIface(Map<String, Boolean> toggledMethods) {
@@ -66,7 +65,7 @@ public class AopModuleTest extends EasyMockTest {
           }
         },
         new AopModule(toggledMethods));
-    return injector.getInstance(Iface.class);
+    return injector.getInstance(AnnotatedAuroraAdmin.class);
   }
 
   @Test
@@ -76,7 +75,7 @@ public class AopModuleTest extends EasyMockTest {
 
   @Test
   public void testNoFlaggedMethods() throws Exception {
-    assertCreateAllowed(ImmutableMap.<String, Boolean>of());
+    assertCreateAllowed(ImmutableMap.of());
   }
 
   @Test
@@ -110,5 +109,13 @@ public class AopModuleTest extends EasyMockTest {
 
     Iface thrift = getIface(toggledMethods);
     assertSame(response, thrift.createJob(job, null, SESSION_KEY));
+  }
+
+  @Test
+  public void assertToStringNotIntercepted() {
+    control.replay();
+
+    Iface thrift = getIface(ImmutableMap.of());
+    assertNotNull(thrift.toString());
   }
 }

@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -26,7 +24,7 @@ public interface SnapshotStore<T> {
    *
    * @return A blob that can be used to recover local storage via {@link #applySnapshot(Object)}.
    */
-   T createSnapshot();
+  T createSnapshot();
 
   /**
    * Applies a snapshot blob to the local storage system, wiping out all existing data and

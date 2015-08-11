@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -25,7 +23,6 @@ import javax.ws.rs.core.Response;
 import javax.ws.rs.core.Response.Status;
 
 import com.google.common.base.Optional;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.twitter.common.base.Closure;
 import com.twitter.common.thrift.Util;
@@ -34,7 +31,6 @@ import org.antlr.stringtemplate.StringTemplate;
 import org.apache.aurora.gen.JobConfiguration;
 import org.apache.aurora.scheduler.base.JobKeys;
 import org.apache.aurora.scheduler.base.Query;
-import org.apache.aurora.scheduler.state.CronJobManager;
 import org.apache.aurora.scheduler.storage.Storage;
 import org.apache.aurora.scheduler.storage.Storage.StoreProvider;
 import org.apache.aurora.scheduler.storage.Storage.Work;
@@ -42,6 +38,8 @@ import org.apache.aurora.scheduler.storage.Storage.Work.Quiet;
 import org.apache.aurora.scheduler.storage.entities.IJobConfiguration;
 import org.apache.aurora.scheduler.storage.entities.IJobKey;
 import org.apache.thrift.TBase;
+
+import static java.util.Objects.requireNonNull;
 
 /**
  * Servlet that prints out the raw configuration for a specified struct.
@@ -54,11 +52,11 @@ public class StructDump extends JerseyTemplateServlet {
   @Inject
   public StructDump(Storage storage) {
     super("structdump");
-    this.storage = Preconditions.checkNotNull(storage);
+    this.storage = requireNonNull(storage);
   }
 
   private static final String USAGE =
-    "<html>Usage: /structdump/task/{task_id} or /structdump/cron/{role}/{env}/{job}</html>";
+      "<html>Usage: /structdump/task/{task_id} or /structdump/cron/{role}/{env}/{job}</html>";
 
   @GET
   @Produces(MediaType.TEXT_HTML)
@@ -106,12 +104,12 @@ public class StructDump extends JerseyTemplateServlet {
       @PathParam("job") final String job) {
 
     final IJobKey jobKey = JobKeys.from(role, environment, job);
-    return dumpEntity("Cron job " + JobKeys.toPath(jobKey),
+    return dumpEntity("Cron job " + JobKeys.canonicalString(jobKey),
         new Work.Quiet<Optional<? extends TBase<?, ?>>>() {
           @Override
           public Optional<JobConfiguration> apply(StoreProvider storeProvider) {
-            return storeProvider.getJobStore().fetchJob(CronJobManager.MANAGER_KEY, jobKey)
-                .transform(IJobConfiguration.TO_BUILDER);
+            return storeProvider.getCronJobStore().fetchJob(jobKey)
+                .transform(IJobConfiguration::newBuilder);
           }
         });
   }
@@ -121,11 +119,11 @@ public class StructDump extends JerseyTemplateServlet {
       @Override
       public void execute(StringTemplate template) {
         template.setAttribute("id", id);
-        Optional<? extends TBase<?, ?>> struct = storage.weaklyConsistentRead(work);
-        if (!struct.isPresent()) {
-          template.setAttribute("exception", "Entity not found");
-        } else {
+        Optional<? extends TBase<?, ?>> struct = storage.read(work);
+        if (struct.isPresent()) {
           template.setAttribute("structPretty", Util.prettyPrint(struct.get()));
+        } else {
+          template.setAttribute("exception", "Entity not found");
         }
       }
     });

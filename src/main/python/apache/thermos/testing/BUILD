@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -15,16 +13,16 @@
 #
 
 python_library(
-  name = 'runner',
-  sources = ['runner.py'],
+  name = 'testing',
+  sources = rglobs('*.py'),
   dependencies = [
-    pants('3rdparty/python:thrift'),
-    pants('3rdparty/python:twitter.common.contextutil'),
-    pants('3rdparty/python:twitter.common.log'),
-    pants('src/main/python/apache/thermos/common:ckpt'),
-    pants('src/main/python/apache/thermos/common:path'),
-    pants('src/main/python/apache/thermos/config'),
-    pants('src/main/python/apache/thermos/core'),
-    pants('src/main/thrift/org/apache/thermos:py-thrift'),
+    '3rdparty/python:thrift',
+    '3rdparty/python:twitter.common.contextutil',
+    '3rdparty/python:twitter.common.log',
+    'src/main/python/apache/thermos/common',
+    'src/main/python/apache/thermos/config',
+    'src/main/python/apache/thermos/core',
+    'api/src/main/thrift/org/apache/thermos',
   ]
+  # NOTE: This is not exported as a setup-py because it's only depended-on by test code.
 )

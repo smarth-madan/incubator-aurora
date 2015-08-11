@@ -1,97 +1,320 @@
 #!/bin/bash
-# A simple integration test for the mesos client, intended to be run  before checkin of major
-#client changes, and as a part of an integrated build process.
 #
-# This test uses the vagrant demonstration environment. It loads up a virtual cluster, and then
-# launches a job, verifies that it's running, updates it, verifies that the update succeeded,
-# and then kills the job.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+#
+# An integration test for the client, using the vagrant environment as a testbed.
+
+# Determine if we are already in the vagrant environment.  If not, start it up and invoke the script
+# from within the environment.
+if [[ "$USER" != "vagrant" ]]; then
+  vagrant up
+  vagrant ssh -c /vagrant/src/test/sh/org/apache/aurora/e2e/test_end_to_end.sh "$@"
+  exit $?
+fi
 
 set -u -e -x
+set -o pipefail
 
-. src/test/sh/org/apache/aurora/e2e/test_common.sh
+readonly TEST_SCHEDULER_IP=192.168.33.7
 
-function run_dev() {
-  vagrant ssh devtools -c "$1"
+_curl() { curl --silent --fail --retry 4 --retry-delay 10 "$@" ; }
+
+tear_down() {
+  set +x  # Disable command echo, as this makes it more difficult see which command failed.
+
+  for job in http_example http_example_docker; do
+    aurora job cancel-update devcluster/vagrant/test/$job >/dev/null 2>&1
+    aurora update abort devcluster/vagrant/test/$job || true >/dev/null 2>&1
+    aurora job killall --no-batching devcluster/vagrant/test/$job >/dev/null 2>&1
+  done
 }
 
-function run_sched() {
-  vagrant ssh aurora-scheduler -c "$1"
+collect_result() {
+  if [[ $RETCODE = 0 ]]
+  then
+    echo "OK (all tests passed)"
+  else
+    echo "!!! FAIL (something returned non-zero)"
+    # Attempt to clean up any state we left behind.
+    tear_down
+  fi
+  exit $RETCODE
 }
 
-devtools_setup() {
-  local _testdir=$1
-  # grab the current branch name, and create a workspace using the same branch in vagrant.
-  branch=$(git branch | grep '*' | cut -c 3-)
-  run_dev "if [ ! -d ~/test_dev ]; then git clone /vagrant ~/test_dev; fi"
-  # Clean out any lingering build products; we want fresh.
-  run_dev "cd ~/test_dev; git reset --hard; git clean -fdx"
-  run_dev "cd ~/test_dev ; git checkout $branch; git pull"
-  run_dev "cd ~/test_dev; ./pants src/main/python/apache/aurora/client/bin:aurora_client"
-  run_dev "cd ~/test_dev; ./pants src/test/sh/org/apache/aurora/e2e/flask:flask_example"
-  if [ ! -d $_testdir ]
-    then
-      mkdir $_testdir
-    fi
-  run_dev "cd ~/test_dev; cp dist/flask_example.pex /vagrant/$_testdir"
-  run_dev "cd ~/test_dev; cp dist/aurora_client.pex /vagrant/$_testdir"
+check_url_live() {
+  [[ $(curl -sL -w '%{http_code}' $1 -o /dev/null) == 200 ]]
 }
 
-test_flask_example() {
-  local _cluster=$1 _role=$2 _env=$3 _job=$4 _testdir=$5 _sched_ip=$6
-  local _base_config=$7 _updated_config=$8
-  jobkey="$_cluster/$_role/$_env/$_job"
-  echo '== Creating job'
-  run_sched "/vagrant/$_testdir/aurora_client.pex create $jobkey $_base_config"
+test_version() {
+  # The version number is written to stderr, making it necessary to redirect the output.
+  [[ $(aurora --version 2>&1) = $(cat /vagrant/.auroraversion) ]]
+}
+
+test_config() {
+  local _config=$1 _jobkey=$2
+
+  joblist=$(aurora config list $_config | tr -dc '[[:print:]]')
+  [[ "$joblist" = "jobs=[$_jobkey]" ]]
+}
+
+test_inspect() {
+  local _jobkey=$1 _config=$2
+
+  aurora job inspect $_jobkey $_config
+}
+
+test_create() {
+  local _jobkey=$1 _config=$2
+
+  aurora job create $_jobkey $_config
+}
+
+test_job_status() {
+  local _cluster=$1 _role=$2 _env=$3 _job=$4
+  local _jobkey="$_cluster/$_role/$_env/$_job"
+
+  echo "== Checking job status"
+  aurora job list $_cluster/$_role/$_env | grep "$_jobkey"
+  aurora job status $_jobkey
+}
+
+test_scheduler_ui() {
+  local _role=$1 _env=$2 _job=$3
 
   # Check that scheduler UI pages shown
-  base_url="http://$_sched_ip:8081"
-  schedlen=$(_curl -s "$base_url/scheduler" | wc -l)
-  # Length of the scheduler doc should be at least 40 lines.
-  test $schedlen -ge 40
-   # User page is at least 200 lines
-  rolelen=$(_curl -s "$base_url/scheduler/$_role" | wc -l)
-  test $rolelen -ge 200
-  joblen=$(_curl "$base_url/scheduler/$_role/$_env/$_job" | wc -l)
-  test $joblen -ge 200
+  base_url="localhost:8081"
+  check_url_live "$base_url/scheduler"
+  check_url_live "$base_url/scheduler/$_role"
+  check_url_live "$base_url/scheduler/$_role/$_env/$_job"
+}
 
-  echo '== Updating test job'
-  run_sched "/vagrant/$_testdir/aurora_client.pex update $jobkey $_updated_config"
+test_observer_ui() {
+  local _cluster=$1 _role=$2 _job=$3
 
-  #echo "== Probing job via 'aurora run'"
-  # TODO(mchucarroll): Get "run" working: the vagrant configuration currently doesn't set up ssh
-  # to allow automatic logins to the slaves. "aurora run" therefore tries to prompt the user for
-  # a password, finds that it's not running in a TTY, and aborts.
-  runlen=$(run_sched "/vagrant/$_testdir/aurora_client.pex run $jobkey 'pwd'" | wc -l)
-  test $runlen -eq 2
+  # Check the observer page
+  observer_url="localhost:1338"
+  check_url_live "$observer_url"
 
-  run_sched "/vagrant/$_testdir/aurora_client.pex killall  $jobkey"
+  # Poll the observer, waiting for it to receive and show information about the task.
+  local _success=0
+  for i in $(seq 1 120); do
+    task_id=$(aurora_admin query -l '%taskId%' --shards=0 --states=RUNNING $_cluster $_role $_job)
+    if check_url_live "$observer_url/task/$task_id"; then
+      _success=1
+      break
+    else
+      sleep 1
+    fi
+  done
+
+  if [[ "$_success" -ne "1" ]]; then
+    echo "Observer task detail page is not available."
+    exit 1
+  fi
+}
+
+test_restart() {
+  local _jobkey=$1
+
+  aurora job restart --batch-size=2 $_jobkey
+}
+
+test_legacy_update() {
+  local _jobkey=$1 _config=$2
+
+  aurora job update $_jobkey $_config
+}
+
+assert_update_state() {
+  local _jobkey=$1 _expected_state=$2
+
+  local _state=$(aurora update list $_jobkey --status active | tail -n +2 | awk '{print $3}')
+  if [[ $_state != $_expected_state ]]; then
+    echo "Expected update to be in state $_expected_state, but found $_state"
+    exit 1
+  fi
+}
+
+test_update() {
+  local _jobkey=$1 _config=$2 _cluster=$3
+
+  aurora update start $_jobkey $_config
+  assert_update_state $_jobkey 'ROLLING_FORWARD'
+  local _update_id=$(aurora update list $_jobkey --status ROLLING_FORWARD \
+      | tail -n +2 | awk '{print $2}')
+  sudo restart aurora-scheduler
+  assert_update_state $_jobkey 'ROLLING_FORWARD'
+  aurora update pause $_jobkey --message='hello'
+  assert_update_state $_jobkey 'ROLL_FORWARD_PAUSED'
+  aurora update resume $_jobkey
+  assert_update_state $_jobkey 'ROLLING_FORWARD'
+  aurora update wait $_jobkey $_update_id
+
+  # Check that the update ended in ROLLED_FORWARD state.  Assumes the status is the last column.
+  local status=$(aurora update info $_jobkey $_update_id | grep 'Current status' | awk '{print $NF}')
+  if [[ $status != "ROLLED_FORWARD" ]]; then
+    echo "Update should have completed in ROLLED_FORWARD state"
+    exit 1
+  fi
+}
+
+test_announce() {
+  local _role=$1 _env=$2 _job=$3
+
+  # default python return code
+  local retcode=0
+
+  # launch aurora client in interpreter mode to get access to the kazoo client
+  env SERVERSET="/aurora/$_role/$_env/$_job" PEX_INTERPRETER=1 \
+    aurora /vagrant/src/test/sh/org/apache/aurora/e2e/validate_serverset.py || retcode=$?
+
+  if [[ $retcode = 1 ]]; then
+    echo "Validated announced job."
+    return 0
+  elif [[ $retcode = 2 ]]; then
+    echo "Job failed to announce in serverset."
+  elif [[ $retcode = 3 ]]; then
+    echo "Job failed to re-announce when expired."
+  else
+    echo "Unknown failure in test script."
+  fi
+
+  exit 1
+
+  validate_serverset "/aurora/$_jobkey"
+}
+
+test_run() {
+  local _jobkey=$1
+
+  # Create an SSH public key so that local SSH works without a password.
+  local _ssh_key=~/.ssh/id_rsa
+  rm -f ${_ssh_key}*
+  ssh-keygen -t rsa -N "" -f $_ssh_key
+  cat ${_ssh_key}.pub >> ~/.ssh/authorized_keys
+
+  # Using the sandbox contents as a proxy for functioning SSH.  List sandbox contents, we expect
+  # 3 instances of the same thing - our python script.
+  sandbox_contents=$(aurora task run $_jobkey 'ls' | awk '{print $2}' | sort | uniq -c)
+  echo "$sandbox_contents"
+  [[ "$sandbox_contents" = "      3 http_example.py" ]]
+}
+
+test_kill() {
+  local _jobkey=$1
+
+  aurora job kill $_jobkey/1
+  aurora job killall $_jobkey
+}
+
+test_quota() {
+  local _cluster=$1 _role=$2
+
+  aurora quota get $_cluster/$_role
+}
+
+test_http_example() {
+  local _cluster=$1 _role=$2 _env=$3 _job=$4
+  local _base_config=$5 _updated_config=$6
+  local _jobkey="$_cluster/$_role/$_env/$_job"
+
+  test_config $_base_config $_jobkey
+  test_inspect $_jobkey $_base_config
+  test_create $_jobkey $_base_config
+  test_job_status $_cluster $_role $_env $_job
+  test_scheduler_ui $_role $_env $_job
+  test_observer_ui $_cluster $_role $_job
+  test_restart $_jobkey
+  test_update $_jobkey $_updated_config $_cluster
+  test_announce $_role $_env $_job
+  test_run $_jobkey
+  test_legacy_update $_jobkey $_base_config
+  test_kill $_jobkey
+  test_quota $_cluster $_role
+}
+
+test_admin() {
+  local _cluster=$1
+  echo '== Testing admin commands'
+  echo '== Getting leading scheduler'
+  aurora_admin get_scheduler $_cluster | grep ":8081"
+}
+
+restore_netrc() {
+  mv ~/.netrc.bak ~/.netrc >/dev/null 2>&1 || true
+}
+
+test_basic_auth_unauthenticated() {
+  local _cluster=$1 _role=$2 _env=$3 _job=$4
+  local _config=$5
+  local _jobkey="$_cluster/$_role/$_env/$_job"
+
+  mv ~/.netrc ~/.netrc.bak
+  trap restore_netrc EXIT
+
+  aurora job create $_jobkey $_config || retcode=$?
+  if [[ $retcode != 30 ]]; then
+    echo "Expected auth error exit code, got $retcode"
+    exit 1
+  fi
+  restore_netrc
 }
 
 RETCODE=1
 # Set up shorthands for test
-export EXAMPLE_DIR=/vagrant/src/test/sh/org/apache/aurora/e2e/flask
-TEST_DIR=deploy_test
-TEST_CLUSTER=example
+export TEST_ROOT=/vagrant/src/test/sh/org/apache/aurora/e2e
+export EXAMPLE_DIR=${TEST_ROOT}/http
+export DOCKER_DIR=${TEST_ROOT}/docker
+TEST_CLUSTER=devcluster
 TEST_ROLE=vagrant
 TEST_ENV=test
-TEST_JOB=flask_example
-TEST_SCHEDULER_IP=192.168.33.6
+TEST_JOB=http_example
+TEST_DOCKER_JOB=http_example_docker
 TEST_ARGS=(
   $TEST_CLUSTER
   $TEST_ROLE
   $TEST_ENV
   $TEST_JOB
-  $TEST_DIR
-  $TEST_SCHEDULER_IP
-  $EXAMPLE_DIR/flask_example.aurora
-  $EXAMPLE_DIR/flask_example_updated.aurora
+  $EXAMPLE_DIR/http_example.aurora
+  $EXAMPLE_DIR/http_example_updated.aurora
   )
 
+TEST_ADMIN_ARGS=(
+  $TEST_CLUSTER
+)
+
+TEST_DOCKER_ARGS=(
+  $TEST_CLUSTER
+  $TEST_ROLE
+  $TEST_ENV
+  $TEST_DOCKER_JOB
+  $EXAMPLE_DIR/http_example_docker.aurora
+  $EXAMPLE_DIR/http_example_docker_updated.aurora
+)
+
 trap collect_result EXIT
-vagrant up
-# wipe the pseudo-deploy dir, and then create it fresh, to guarantee that the
-# test runs clean.
-rm -rf $TEST_DIR
-devtools_setup $TEST_DIR
-test_flask_example "${TEST_ARGS[@]}"
+
+aurorabuild all
+test_version
+test_http_example "${TEST_ARGS[@]}"
+
+# build the test docker image
+sudo docker build -t http_example ${TEST_ROOT}
+test_http_example "${TEST_DOCKER_ARGS[@]}"
+
+test_admin "${TEST_ADMIN_ARGS[@]}"
+test_basic_auth_unauthenticated  "${TEST_ARGS[@]}"
+
+/vagrant/src/test/sh/org/apache/aurora/e2e/test_kerberos_end_to_end.sh
 RETCODE=0

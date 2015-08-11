@@ -1,6 +1,4 @@
 /**
- * Copyright 2014 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,9 +13,11 @@
  */
 package org.apache.aurora.scheduler.quota;
 
+import java.util.Objects;
+
 import org.apache.aurora.scheduler.storage.entities.IResourceAggregate;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
 
 /**
  * Wraps allocated quota and consumption details.
@@ -32,9 +32,9 @@ public class QuotaInfo {
       IResourceAggregate prodConsumption,
       IResourceAggregate nonProdConsumption) {
 
-    this.quota = checkNotNull(quota);
-    this.prodConsumption = checkNotNull(prodConsumption);
-    this.nonProdConsumption = checkNotNull(nonProdConsumption);
+    this.quota = requireNonNull(quota);
+    this.prodConsumption = requireNonNull(prodConsumption);
+    this.nonProdConsumption = requireNonNull(nonProdConsumption);
   }
 
   /**
@@ -42,7 +42,7 @@ public class QuotaInfo {
    *
    * @return Available quota.
    */
-  public IResourceAggregate guota() {
+  public IResourceAggregate getQuota() {
     return quota;
   }
 
@@ -51,7 +51,7 @@ public class QuotaInfo {
    *
    * @return Production job consumption.
    */
-  public IResourceAggregate prodConsumption() {
+  public IResourceAggregate getProdConsumption() {
     return prodConsumption;
   }
 
@@ -60,7 +60,34 @@ public class QuotaInfo {
    *
    * @return Non production job consumption.
    */
-  public IResourceAggregate nonProdConsumption() {
+  public IResourceAggregate getNonProdConsumption() {
     return nonProdConsumption;
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (!(o instanceof QuotaInfo)) {
+      return false;
+    }
+
+    QuotaInfo other = (QuotaInfo) o;
+
+    return Objects.equals(quota, other.quota)
+        && Objects.equals(prodConsumption, other.prodConsumption)
+        && Objects.equals(nonProdConsumption, other.nonProdConsumption);
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(quota, prodConsumption, nonProdConsumption);
+  }
+
+  @Override
+  public String toString() {
+    return com.google.common.base.Objects.toStringHelper(this)
+        .add("quota", quota)
+        .add("prodConsumption", prodConsumption)
+        .add("nonProdConsumption", nonProdConsumption)
+        .toString();
   }
 }

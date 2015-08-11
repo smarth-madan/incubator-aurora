@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -19,32 +17,27 @@ import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.Set;
 
-import javax.inject.Inject;
-
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Function;
 import com.google.common.base.Optional;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Ordering;
+import com.google.inject.Inject;
+
+import com.twitter.common.inject.TimedInterceptor.Timed;
 import com.twitter.common.quantity.Amount;
 import com.twitter.common.quantity.Data;
 
-import org.apache.aurora.gen.Attribute;
 import org.apache.aurora.gen.MaintenanceMode;
 import org.apache.aurora.gen.TaskConstraint;
 import org.apache.aurora.scheduler.ResourceSlot;
 import org.apache.aurora.scheduler.configuration.ConfigurationManager;
-import org.apache.aurora.scheduler.state.MaintenanceController;
-import org.apache.aurora.scheduler.storage.AttributeStore;
-import org.apache.aurora.scheduler.storage.Storage;
-import org.apache.aurora.scheduler.storage.Storage.StoreProvider;
-import org.apache.aurora.scheduler.storage.Storage.Work.Quiet;
+import org.apache.aurora.scheduler.mesos.ExecutorSettings;
+import org.apache.aurora.scheduler.storage.entities.IAttribute;
 import org.apache.aurora.scheduler.storage.entities.IConstraint;
-import org.apache.aurora.scheduler.storage.entities.ITaskConfig;
+import org.apache.aurora.scheduler.storage.entities.IHostAttributes;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
 
 import static org.apache.aurora.gen.MaintenanceMode.DRAINED;
 import static org.apache.aurora.gen.MaintenanceMode.DRAINING;
@@ -57,48 +50,11 @@ import static org.apache.aurora.scheduler.filter.SchedulingFilterImpl.ResourceVe
 /**
  * Implementation of the scheduling filter that ensures resource requirements of tasks are
  * fulfilled, and that tasks are allowed to run on the given machine.
- *
  */
 public class SchedulingFilterImpl implements SchedulingFilter {
-
-  @VisibleForTesting static final Veto DEDICATED_HOST_VETO =
-      Veto.constraintMismatch("Host is dedicated");
-
   private static final Optional<Veto> NO_VETO = Optional.absent();
 
   private static final Set<MaintenanceMode> VETO_MODES = EnumSet.of(DRAINING, DRAINED);
-
-  private final Storage storage;
-  private final MaintenanceController maintenance;
-
-  /**
-   * Creates a new scheduling filter.
-   *
-   * @param storage Interface to accessing the task store.
-   * @param maintenance Interface to accessing the maintenance controller
-   */
-  @Inject
-  public SchedulingFilterImpl(Storage storage, MaintenanceController maintenance) {
-    this.storage = checkNotNull(storage);
-    this.maintenance = checkNotNull(maintenance);
-  }
-
-  /**
-   * A function that may veto a task.
-   */
-  private interface FilterRule extends Function<ITaskConfig, Iterable<Veto>> { }
-
-  /**
-   * Convenience class for a rule that will only ever have a single veto.
-   */
-  private abstract static class SingleVetoRule implements FilterRule {
-    @Override
-    public final Iterable<Veto> apply(ITaskConfig task) {
-      return doApply(task).asSet();
-    }
-
-    abstract Optional<Veto> doApply(ITaskConfig task);
-  }
 
   // Scaling ranges to use for comparison of vetos.  This has no real bearing besides trying to
   // determine if a veto along one resource vector is a 'stronger' veto than that of another vector.
@@ -132,48 +88,36 @@ public class SchedulingFilterImpl implements SchedulingFilter {
     }
 
     private static int scale(double value, int range) {
-      return Math.min(Veto.MAX_SCORE, (int) ((Veto.MAX_SCORE * value)) / range);
+      return Math.min(
+          VetoType.INSUFFICIENT_RESOURCES.getScore(),
+          (int) (VetoType.INSUFFICIENT_RESOURCES.getScore() * value) / range);
     }
 
     @VisibleForTesting
     Veto veto(double excess) {
-      return new Veto("Insufficient " + name, scale(excess, range));
+      return Veto.insufficientResources(name, scale(excess, range));
     }
   }
 
-  private Iterable<FilterRule> rulesFromOffer(final ResourceSlot available) {
-    return ImmutableList.<FilterRule>of(
-        new SingleVetoRule() {
-          @Override
-          public Optional<Veto> doApply(ITaskConfig task) {
-            return CPU.maybeVeto(
-                available.getNumCpus(),
-                ResourceSlot.from(task).getNumCpus());
-          }
-        },
-        new SingleVetoRule() {
-          @Override
-          public Optional<Veto> doApply(ITaskConfig task) {
-            return RAM.maybeVeto(
-                available.getRam().as(Data.MB),
-                ResourceSlot.from(task).getRam().as(Data.MB));
-          }
-        },
-        new SingleVetoRule() {
-          @Override
-          public Optional<Veto> doApply(ITaskConfig task) {
-            return DISK.maybeVeto(available.getDisk().as(Data.MB),
-                ResourceSlot.from(task).getDisk().as(Data.MB));
-          }
-        },
-        new SingleVetoRule() {
-          @Override
-          public Optional<Veto> doApply(ITaskConfig task) {
-            return PORTS.maybeVeto(available.getNumPorts(),
-                ResourceSlot.from(task).getNumPorts());
-          }
-        }
-    );
+  private static void maybeAddVeto(
+      ImmutableSet.Builder<Veto> vetoes,
+      ResourceVector vector,
+      double available,
+      double requested) {
+
+    Optional<Veto> veto = vector.maybeVeto(available, requested);
+    if (veto.isPresent()) {
+      vetoes.add(veto.get());
+    }
+  }
+
+  private static Set<Veto> getResourceVetoes(ResourceSlot available, ResourceSlot required) {
+    ImmutableSet.Builder<Veto> vetoes = ImmutableSet.builder();
+    maybeAddVeto(vetoes, CPU, available.getNumCpus(), required.getNumCpus());
+    maybeAddVeto(vetoes, RAM, available.getRam().as(Data.MB), required.getRam().as(Data.MB));
+    maybeAddVeto(vetoes, DISK, available.getDisk().as(Data.MB), required.getDisk().as(Data.MB));
+    maybeAddVeto(vetoes, PORTS, available.getNumPorts(), required.getNumPorts());
+    return vetoes.build();
   }
 
   private static boolean isValueConstraint(IConstraint constraint) {
@@ -191,89 +135,75 @@ public class SchedulingFilterImpl implements SchedulingFilter {
         }
       });
 
-  private FilterRule getConstraintFilter(
-      final AttributeAggregate jobState,
-      final String slaveHost) {
+  private final ExecutorSettings executorSettings;
 
-    return new FilterRule() {
-      @Override
-      public Iterable<Veto> apply(final ITaskConfig task) {
-        if (!task.isSetConstraints()) {
-          return ImmutableList.of();
-        }
-
-        // In the interest of performance, we perform a weakly consistent read here.  The biggest
-        // risk of this is that we might schedule against stale host attributes, or we might fail
-        // to correctly satisfy a diversity constraint.  Given that the likelihood is relatively low
-        // for both of these, and the impact is also low, the weak consistency is acceptable.
-        return storage.weaklyConsistentRead(new Quiet<Iterable<Veto>>() {
-          @Override
-          public Iterable<Veto> apply(final StoreProvider storeProvider) {
-            ConstraintFilter constraintFilter = new ConstraintFilter(
-                jobState,
-                AttributeStore.Util.attributesOrNone(storeProvider, slaveHost));
-            ImmutableList.Builder<Veto> vetoes = ImmutableList.builder();
-            for (IConstraint constraint : VALUES_FIRST.sortedCopy(task.getConstraints())) {
-              Optional<Veto> veto = constraintFilter.getVeto(constraint);
-              if (veto.isPresent()) {
-                vetoes.add(veto.get());
-                if (isValueConstraint(constraint)) {
-                  // Break when a value constraint mismatch is found to avoid other
-                  // potentially-expensive operations to satisfy other constraints.
-                  break;
-                }
-              }
-            }
-
-            return vetoes.build();
-          }
-        });
-      }
-    };
+  @Inject
+  @VisibleForTesting
+  public SchedulingFilterImpl(ExecutorSettings executorSettings) {
+    this.executorSettings = requireNonNull(executorSettings);
   }
 
-  private Optional<Veto> getMaintenanceVeto(String slaveHost) {
-    MaintenanceMode mode = maintenance.getMode(slaveHost);
+  private Optional<Veto> getConstraintVeto(
+      Iterable<IConstraint> taskConstraints,
+      AttributeAggregate jobState,
+      Iterable<IAttribute> offerAttributes) {
+
+    for (IConstraint constraint : VALUES_FIRST.sortedCopy(taskConstraints)) {
+      Optional<Veto> veto = ConstraintMatcher.getVeto(jobState, offerAttributes, constraint);
+      if (veto.isPresent()) {
+        // Break early to avoid potentially-expensive operations to satisfy other constraints.
+        return veto;
+      }
+    }
+
+    return Optional.absent();
+  }
+
+  private Optional<Veto> getMaintenanceVeto(MaintenanceMode mode) {
     return VETO_MODES.contains(mode)
-        ? Optional.of(ConstraintFilter.maintenanceVeto(mode.toString().toLowerCase()))
+        ? Optional.of(Veto.maintenance(mode.toString().toLowerCase()))
         : NO_VETO;
   }
 
-  private Set<Veto> getResourceVetoes(ResourceSlot offer, ITaskConfig task) {
-    ImmutableSet.Builder<Veto> builder = ImmutableSet.builder();
-    for (FilterRule rule : rulesFromOffer(offer)) {
-      builder.addAll(rule.apply(task));
-    }
-    return builder.build();
+  private boolean isDedicated(IHostAttributes attributes) {
+    return Iterables.any(
+        attributes.getAttributes(),
+        new ConstraintMatcher.NameFilter(DEDICATED_ATTRIBUTE));
   }
 
-  private boolean isDedicated(final String slaveHost) {
-    Iterable<Attribute> slaveAttributes =
-        storage.weaklyConsistentRead(new Quiet<Iterable<Attribute>>() {
-          @Override
-          public Iterable<Attribute> apply(final StoreProvider storeProvider) {
-            return AttributeStore.Util.attributesOrNone(storeProvider, slaveHost);
-          }
-        });
-
-    return Iterables.any(slaveAttributes, new ConstraintFilter.NameFilter(DEDICATED_ATTRIBUTE));
-  }
-
+  @Timed("scheduling_filter")
   @Override
-  public Set<Veto> filter(
-      ResourceSlot offer,
-      String slaveHost,
-      ITaskConfig task,
-      String taskId,
-      AttributeAggregate attributeAggregate) {
+  public Set<Veto> filter(UnusedResource resource, ResourceRequest request) {
+    // Apply veto filtering rules from higher to lower score making sure we cut over and return
+    // early any time a veto from a score group is applied. This helps to more accurately report
+    // a veto reason in the NearestFit.
 
-    if (!ConfigurationManager.isDedicated(task) && isDedicated(slaveHost)) {
-      return ImmutableSet.of(DEDICATED_HOST_VETO);
+    // 1. Dedicated constraint check (highest score).
+    if (!ConfigurationManager.isDedicated(request.getConstraints())
+        && isDedicated(resource.getAttributes())) {
+
+      return ImmutableSet.of(Veto.dedicatedHostConstraintMismatch());
     }
-    return ImmutableSet.<Veto>builder()
-        .addAll(getConstraintFilter(attributeAggregate, slaveHost).apply(task))
-        .addAll(getResourceVetoes(offer, task))
-        .addAll(getMaintenanceVeto(slaveHost).asSet())
-        .build();
+
+    // 2. Host maintenance check.
+    Optional<Veto> maintenanceVeto = getMaintenanceVeto(resource.getAttributes().getMode());
+    if (maintenanceVeto.isPresent()) {
+      return maintenanceVeto.asSet();
+    }
+
+    // 3. Value and limit constraint check.
+    Optional<Veto> constraintVeto = getConstraintVeto(
+        request.getConstraints(),
+        request.getJobState(),
+        resource.getAttributes().getAttributes());
+
+    if (constraintVeto.isPresent()) {
+      return constraintVeto.asSet();
+    }
+
+    // 4. Resource check (lowest score).
+    return getResourceVetoes(
+        resource.getResourceSlot(),
+        ResourceSlot.from(request.getTask(), executorSettings));
   }
 }

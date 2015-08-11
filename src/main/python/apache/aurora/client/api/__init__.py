@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,39 +12,57 @@
 # limitations under the License.
 #
 
+from __future__ import print_function
+
 from twitter.common import log
 
+from apache.aurora.client.base import combine_messages
 from apache.aurora.common.aurora_job_key import AuroraJobKey
-from apache.aurora.common.auth import make_session_key
+from apache.aurora.common.auth.auth_module_manager import make_session_key
 from apache.aurora.common.cluster import Cluster
-
-from gen.apache.aurora.constants import LIVE_STATES
-from gen.apache.aurora.ttypes import (
-    Response,
-    Identity,
-    ResourceAggregate,
-    ResponseCode,
-    TaskQuery)
 
 from .restarter import Restarter
 from .scheduler_client import SchedulerProxy
 from .sla import Sla
 from .updater import Updater
+from .updater_util import UpdaterConfig
+
+from gen.apache.aurora.api.constants import LIVE_STATES
+from gen.apache.aurora.api.ttypes import (
+    JobKey,
+    JobUpdateKey,
+    JobUpdateQuery,
+    JobUpdateRequest,
+    Lock,
+    ResourceAggregate,
+    ResponseCode,
+    TaskQuery
+)
 
 
 class AuroraClientAPI(object):
   """This class provides the API to talk to the twitter scheduler"""
 
   class Error(Exception): pass
-  class TypeError(Error, TypeError): pass
   class ClusterMismatch(Error, ValueError): pass
+  class ThriftInternalError(Error): pass
+  class UpdateConfigError(Error): pass
 
-  def __init__(self, cluster, verbose=False, session_key_factory=make_session_key):
+  def __init__(
+      self,
+      cluster,
+      user_agent,
+      verbose=False,
+      session_key_factory=make_session_key):
+
     if not isinstance(cluster, Cluster):
       raise TypeError('AuroraClientAPI expects instance of Cluster for "cluster", got %s' %
           type(cluster))
     self._scheduler_proxy = SchedulerProxy(
-        cluster, verbose=verbose, session_key_factory=session_key_factory)
+        cluster,
+        verbose=verbose,
+        session_key_factory=session_key_factory,
+        user_agent=user_agent)
     self._cluster = cluster
 
   @property
@@ -63,6 +79,16 @@ class AuroraClientAPI(object):
     log.debug('Lock %s' % lock)
     return self._scheduler_proxy.createJob(config.job(), lock)
 
+  def schedule_cron(self, config, lock=None):
+    log.info("Registering job %s with cron" % config.name())
+    log.debug('Full configuration: %s' % config.job())
+    log.debug('Lock %s' % lock)
+    return self._scheduler_proxy.scheduleCronJob(config.job(), lock)
+
+  def deschedule_cron(self, jobkey, lock=None):
+    log.info("Removing cron schedule for job %s" % jobkey)
+    return self._scheduler_proxy.descheduleCronJob(jobkey.to_thrift(), lock)
+
   def populate_job_config(self, config):
     return self._scheduler_proxy.populateJobConfig(config.job())
 
@@ -78,13 +104,10 @@ class AuroraClientAPI(object):
 
   def kill_job(self, job_key, instances=None, lock=None):
     log.info("Killing tasks for job: %s" % job_key)
-    if not isinstance(job_key, AuroraJobKey):
-      raise TypeError('Expected type of job_key %r to be %s but got %s instead'
-          % (job_key, AuroraJobKey.__name__, job_key.__class__.__name__))
+    self._assert_valid_job_key(job_key)
 
     # Leave query.owner.user unset so the query doesn't filter jobs only submitted by a particular
     # user.
-    # TODO(wfarner): Refactor this when Identity is removed from TaskQuery.
     query = job_key.to_thrift_query()
     if instances is not None:
       log.info("Instances to be killed: %s" % instances)
@@ -95,18 +118,26 @@ class AuroraClientAPI(object):
     self._assert_valid_job_key(job_key)
 
     log.info("Checking status of %s" % job_key)
-    return self.query(job_key.to_thrift_query())
+    return self.query_no_configs(job_key.to_thrift_query())
 
   @classmethod
-  def build_query(cls, role, job, instances=None, statuses=LIVE_STATES, env=None):
-    return TaskQuery(owner=Identity(role=role),
-                     jobName=job,
+  def build_query(cls, role, job, env=None, instances=None, statuses=LIVE_STATES):
+    return TaskQuery(jobKeys=[JobKey(role=role, environment=env, name=job)],
                      statuses=statuses,
-                     instanceIds=instances,
-                     environment=env)
+                     instanceIds=instances)
 
   def query(self, query):
-    return self._scheduler_proxy.getTasksStatus(query)
+    try:
+      return self._scheduler_proxy.getTasksStatus(query)
+    except SchedulerProxy.ThriftInternalError as e:
+      raise self.ThriftInternalError(e.args[0])
+
+  def query_no_configs(self, query):
+    """Returns all matching tasks without TaskConfig.executorConfig set."""
+    try:
+      return self._scheduler_proxy.getTasksWithoutConfigs(query)
+    except SchedulerProxy.ThriftInternalError as e:
+      raise self.ThriftInternalError(e.args[0])
 
   def update_job(self, config, health_check_interval_seconds=3, instances=None):
     """Run a job update for a given config, for the specified instances.  If
@@ -118,6 +149,103 @@ class AuroraClientAPI(object):
 
     return updater.update(instances)
 
+  def start_job_update(self, config, message, instances=None):
+    """Requests Scheduler to start job update process.
+
+    Arguments:
+    config -- AuroraConfig instance with update details.
+    message -- Audit message to include with the change.
+    instances -- Optional list of instances to restrict update to.
+
+    Returns response object with update ID and acquired job lock.
+    """
+    try:
+      settings = UpdaterConfig(**config.update_config().get()).to_thrift_update_settings(instances)
+    except ValueError as e:
+      raise self.UpdateConfigError(str(e))
+
+    log.info("Starting update for: %s" % config.name())
+    request = JobUpdateRequest(
+        instanceCount=config.instances(),
+        settings=settings,
+        taskConfig=config.job().taskConfig
+    )
+
+    return self._scheduler_proxy.startJobUpdate(request, message)
+
+  def pause_job_update(self, update_key, message):
+    """Requests Scheduler to pause active job update.
+
+    Arguments:
+    update_key -- Update identifier.
+    message -- Audit message to include with the change.
+
+    Returns response object.
+    """
+    return self._scheduler_proxy.pauseJobUpdate(update_key, message)
+
+  def resume_job_update(self, update_key, message):
+    """Requests Scheduler to resume a job update paused previously.
+
+    Arguments:
+    update_key -- Update identifier.
+    message -- Audit message to include with the change.
+
+    Returns response object.
+    """
+    return self._scheduler_proxy.resumeJobUpdate(update_key, message)
+
+  def abort_job_update(self, update_key, message):
+    """Requests Scheduler to abort active or paused job update.
+
+    Arguments:
+    update_key -- Update identifier.
+    message -- Audit message to include with the change.
+
+    Returns response object.
+    """
+    return self._scheduler_proxy.abortJobUpdate(update_key, message)
+
+  def query_job_updates(
+      self,
+      role=None,
+      job_key=None,
+      user=None,
+      update_statuses=None,
+      update_key=None):
+    """Returns all job updates matching the query.
+
+    Arguments:
+    role -- job role.
+    job_key -- job key.
+    user -- user who initiated an update.
+    update_statuses -- set of JobUpdateStatus to match.
+    update_key -- JobUpdateKey to match.
+
+    Returns response object with all matching job update summaries.
+    """
+    # TODO(wfarner): Consider accepting JobUpdateQuery in this function instead of kwargs.
+    return self._scheduler_proxy.getJobUpdateSummaries(
+        JobUpdateQuery(
+            role=role,
+            jobKey=job_key.to_thrift() if job_key else None,
+            user=user,
+            updateStatuses=update_statuses,
+            key=update_key))
+
+  def get_job_update_details(self, key):
+    """Gets JobUpdateDetails for the specified job update ID.
+
+    Arguments:
+    id -- job update ID.
+
+    Returns a response object with JobUpdateDetails.
+    """
+    if not isinstance(key, JobUpdateKey):
+      raise self.TypeError('Invalid key %r: expected %s but got %s'
+                           % (key, JobUpdateKey.__name__, key.__class__.__name__))
+    return self._scheduler_proxy.getJobUpdateDetails(key)
+
   def cancel_update(self, job_key):
     """Cancel the update represented by job_key. Returns whether or not the cancellation was
        successful."""
@@ -126,13 +254,16 @@ class AuroraClientAPI(object):
     log.info("Canceling update on job %s" % job_key)
     resp = Updater.cancel_update(self._scheduler_proxy, job_key)
     if resp.responseCode != ResponseCode.OK:
-      log.error('Error cancelling the update: %s' % resp.message)
+      log.error('Error cancelling the update: %s' % combine_messages(resp))
     return resp
 
   def restart(self, job_key, instances, updater_config, health_check_interval_seconds):
-    """Perform a rolling restart of the job. If instances is None or [], restart all instances. Returns
-       the scheduler response for the last restarted batch of instances (which allows the client to
-       show the job URL), or the status check response if no tasks were active.
+    """Perform a rolling restart of the job.
+
+       If instances is None or [], restart all instances.  Returns the
+       scheduler response for the last restarted batch of instances (which
+       allows the client to show the job URL), or the status check response
+       if no tasks were active.
     """
     self._assert_valid_job_key(job_key)
 
@@ -195,16 +326,27 @@ class AuroraClientAPI(object):
   def unsafe_rewrite_config(self, rewrite_request):
     return self._scheduler_proxy.rewriteConfigs(rewrite_request)
 
+  def get_locks(self):
+    return self._scheduler_proxy.getLocks()
+
   def sla_get_job_uptime_vector(self, job_key):
     self._assert_valid_job_key(job_key)
     return Sla(self._scheduler_proxy).get_job_uptime_vector(job_key)
 
-  def sla_get_safe_domain_vector(self, hosts=None):
-    return Sla(self._scheduler_proxy).get_domain_uptime_vector(self._cluster, hosts)
+  def sla_get_safe_domain_vector(self, min_instance_count, hosts=None):
+    return Sla(self._scheduler_proxy).get_domain_uptime_vector(
+        self._cluster,
+        min_instance_count,
+        hosts)
+
+  def _assert_valid_lock(self, lock):
+    if not isinstance(lock, Lock):
+      raise TypeError('Invalid lock %r: expected %s but got %s'
+          % (lock, AuroraJobKey.__name__, lock.__class__.__name__))
 
   def _assert_valid_job_key(self, job_key):
     if not isinstance(job_key, AuroraJobKey):
-      raise self.TypeError('Invalid job_key %r: expected %s but got %s'
+      raise TypeError('Invalid job_key %r: expected %s but got %s'
           % (job_key, AuroraJobKey.__name__, job_key.__class__.__name__))
     if job_key.cluster != self.cluster.name:
       raise self.ClusterMismatch('job %s does not belong to cluster %s' % (job_key,

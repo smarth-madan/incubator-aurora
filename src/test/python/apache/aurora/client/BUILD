@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,12 +14,12 @@
 
 python_test_suite(name = 'all',
   dependencies = [
-    pants(':binding_helper'),
-    pants(':config'),
-    pants('src/test/python/apache/aurora/client/api:all'),
-    pants('src/test/python/apache/aurora/client/cli:all'),
-    pants('src/test/python/apache/aurora/client/commands:all'),
-    pants('src/test/python/apache/aurora/client/hooks:all'),
+    ':base',
+    ':binding_helper',
+    ':config',
+    'src/test/python/apache/aurora/client/api:all',
+    'src/test/python/apache/aurora/client/cli:all',
+    'src/test/python/apache/aurora/client/hooks:all',
   ],
 )
 
@@ -29,18 +27,25 @@ python_tests(
   name = 'binding_helper',
   sources = ['test_binding_helper.py'],
   dependencies = [
-    pants('3rdparty/python:pystachio'),
-    pants('3rdparty/python:twitter.common.contextutil'),
-    pants('src/main/python/apache/aurora/client:binding_helper'),
-    pants('src/main/python/apache/aurora/config'),
+    '3rdparty/python:pystachio',
+    '3rdparty/python:twitter.common.contextutil',
+    'src/main/python/apache/aurora/client',
+    'src/main/python/apache/aurora/config',
+  ],
+)
+
+python_tests(name = 'base',
+  sources = ['test_base.py'],
+  dependencies = [
+    'src/main/python/apache/aurora/client',
   ],
 )
 
 python_tests(name = 'config',
   sources = ['test_config.py'],
   dependencies = [
-    pants('3rdparty/python:mox'),
-    pants('src/main/python/apache/aurora/client:config'),
+    '3rdparty/python:mox',
+    'src/main/python/apache/aurora/client',
   ],
 )
 
@@ -48,6 +53,6 @@ python_library(
   name = 'fake_scheduler_proxy',
   sources = ['fake_scheduler_proxy.py'],
   dependencies = [
-    pants('src/main/python/apache/aurora/client/api:scheduler_client'),
+    'src/main/python/apache/aurora/client',
   ]
 )

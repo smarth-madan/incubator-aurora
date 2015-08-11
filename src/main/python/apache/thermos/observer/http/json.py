@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -47,11 +45,11 @@ class TaskObserverJSONBindings(object):
     task_ids = HttpServer.Request.GET.get('task_id', [])
     if task_ids:
       task_ids = urllib.unquote(task_ids).split(',')
-    return self._observer.task(task_ids)
+    return self._observer.tasks(task_ids)
 
   @HttpServer.route("/j/task/:task_id")
   def handle_task(self, task_id):
-    return self._observer.task([task_id])
+    return self._observer.tasks([task_id])
 
   @HttpServer.route("/j/process/:task_id")
   @HttpServer.route("/j/process/:task_id/:process")
@@ -69,4 +67,3 @@ class TaskObserverJSONBindings(object):
     if task_ids:
       task_ids = urllib.unquote(task_ids).split(',')
     return self._observer.processes(task_ids)
-

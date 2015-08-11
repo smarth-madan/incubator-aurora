@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -24,22 +22,18 @@ as their corresponding Thrift structs:
 
 """
 
-import os
 import copy
 import errno
+import os
 import threading
-
-from apache.thermos.common.ckpt import CheckpointDispatcher
-
-from gen.apache.thermos.ttypes import (
-  ProcessState,
-  RunnerCkpt,
-  RunnerState,
-  TaskState,
-)
 
 from twitter.common import log
 from twitter.common.recordio import ThriftRecordReader
+
+from apache.thermos.common.ckpt import CheckpointDispatcher
+from apache.thermos.common.path import TaskPath
+
+from gen.apache.thermos.ttypes import ProcessState, RunnerCkpt, RunnerState, TaskState
 
 
 class TaskMonitor(object):
@@ -48,13 +42,17 @@ class TaskMonitor(object):
     its runner checkpoint. Also exports information on active processes in the task.
   """
 
-  def __init__(self, pathspec, task_id):
-    self._task_id = task_id
+  def __init__(self, root, task_id):
+    """Construct a TaskMonitor.
+
+    :param root: The checkpoint root of the task.
+    :param task_id: The task id of the task.
+    """
+    pathspec = TaskPath(root=root, task_id=task_id)
     self._dispatcher = CheckpointDispatcher()
     self._runnerstate = RunnerState(processes={})
-    self._runner_ckpt = pathspec.given(task_id=task_id).getpath('runner_checkpoint')
-    self._active_file, self._finished_file = (
-        pathspec.given(task_id=task_id, state=state).getpath('task_path')
+    self._runner_ckpt = pathspec.getpath('runner_checkpoint')
+    self._active_file, self._finished_file = (pathspec.given(state=state).getpath('task_path')
         for state in ('active', 'finished'))
     self._ckpt_head = 0
     self._apply_states()
@@ -91,7 +89,7 @@ class TaskMonitor(object):
     except OSError as e:
       if e.errno == errno.ENOENT:
         # The log doesn't yet exist, will retry later.
-        log.warning('Could not read from discovered task %s.' % self._task_id)
+        log.warning('Could not read from checkpoint %s' % self._runner_ckpt)
         return False
       else:
         raise
@@ -104,10 +102,14 @@ class TaskMonitor(object):
     with self._lock:
       return self._apply_states()
 
+  def get_sandbox(self):
+    """Get the sandbox of this task, or None if it has not yet been discovered."""
+    state = self.get_state()
+    if state.header:
+      return state.header.sandbox
+
   def get_state(self):
-    """
-      Get the latest state of this Task.
-    """
+    """Get the latest state of this Task."""
     with self._lock:
       self._apply_states()
       return copy.deepcopy(self._runnerstate)

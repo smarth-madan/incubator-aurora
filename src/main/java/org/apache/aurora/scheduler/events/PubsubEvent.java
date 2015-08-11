@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,18 +13,21 @@
  */
 package org.apache.aurora.scheduler.events;
 
+import java.util.Objects;
 import java.util.Set;
 
-import com.google.common.base.Objects;
 import com.google.common.base.Optional;
 
-import org.apache.aurora.gen.HostStatus;
 import org.apache.aurora.gen.ScheduleStatus;
+import org.apache.aurora.scheduler.base.TaskGroupKey;
 import org.apache.aurora.scheduler.base.Tasks;
 import org.apache.aurora.scheduler.filter.SchedulingFilter.Veto;
+import org.apache.aurora.scheduler.storage.entities.IHostAttributes;
 import org.apache.aurora.scheduler.storage.entities.IScheduledTask;
+import org.apache.mesos.Protos;
+import org.apache.mesos.Protos.TaskStatus;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
 
 /**
  * Event notifications related to tasks.
@@ -36,17 +37,17 @@ public interface PubsubEvent {
   /**
    * Interface with no functionality, but identifies a class as supporting task pubsub events.
    */
-  public interface EventSubscriber {
+  interface EventSubscriber {
   }
 
   /**
    * Event sent when tasks were deleted.
    */
-  public static class TasksDeleted implements PubsubEvent {
+  class TasksDeleted implements PubsubEvent {
     private final Set<IScheduledTask> tasks;
 
     public TasksDeleted(Set<IScheduledTask> tasks) {
-      this.tasks = checkNotNull(tasks);
+      this.tasks = requireNonNull(tasks);
     }
 
     public Set<IScheduledTask> getTasks() {
@@ -60,17 +61,17 @@ public interface PubsubEvent {
       }
 
       TasksDeleted other = (TasksDeleted) o;
-      return Objects.equal(tasks, other.tasks);
+      return Objects.equals(tasks, other.tasks);
     }
 
     @Override
     public int hashCode() {
-      return Objects.hashCode(tasks);
+      return Objects.hash(tasks);
     }
 
     @Override
     public String toString() {
-      return Objects.toStringHelper(this)
+      return com.google.common.base.Objects.toStringHelper(this)
           .add("tasks", Tasks.ids(tasks))
           .toString();
     }
@@ -78,14 +79,16 @@ public interface PubsubEvent {
 
   /**
    * Event sent when a task changed state.
+   * <p>
+   * This class is final as it should only be constructed through declared factory methods.
    */
-  public static final class TaskStateChange implements PubsubEvent {
+  final class TaskStateChange implements PubsubEvent {
     private final IScheduledTask task;
     private final Optional<ScheduleStatus> oldState;
 
     private TaskStateChange(IScheduledTask task, Optional<ScheduleStatus> oldState) {
-      this.task = checkNotNull(task);
-      this.oldState = checkNotNull(oldState);
+      this.task = requireNonNull(task);
+      this.oldState = requireNonNull(oldState);
     }
 
     /**
@@ -95,7 +98,7 @@ public interface PubsubEvent {
      * @return A state change event.
      */
     public static TaskStateChange initialized(IScheduledTask task) {
-      return new TaskStateChange(task, Optional.<ScheduleStatus>absent());
+      return new TaskStateChange(task, Optional.absent());
     }
 
     /**
@@ -136,18 +139,18 @@ public interface PubsubEvent {
       }
 
       TaskStateChange other = (TaskStateChange) o;
-      return Objects.equal(task, other.task)
-          && Objects.equal(oldState, other.oldState);
+      return Objects.equals(task, other.task)
+          && Objects.equals(oldState, other.oldState);
     }
 
     @Override
     public int hashCode() {
-      return Objects.hashCode(task, oldState);
+      return Objects.hash(task, oldState);
     }
 
     @Override
     public String toString() {
-      return Objects.toStringHelper(this)
+      return com.google.common.base.Objects.toStringHelper(this)
           .add("task", Tasks.id(task))
           .add("oldState", getOldState())
           .add("newState", getNewState())
@@ -156,49 +159,56 @@ public interface PubsubEvent {
   }
 
   /**
-   * Event sent when a host changed maintenance state.
+   * Event sent when a host's attributes change.
    */
-  public static class HostMaintenanceStateChange implements PubsubEvent {
-    private final HostStatus status;
+  class HostAttributesChanged implements PubsubEvent {
+    private final IHostAttributes attributes;
 
-    public HostMaintenanceStateChange(HostStatus status) {
-      this.status = checkNotNull(status);
+    public HostAttributesChanged(IHostAttributes attributes) {
+      this.attributes = requireNonNull(attributes);
     }
 
-    public HostStatus getStatus() {
-      return status;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-      if (!(o instanceof HostMaintenanceStateChange)) {
-        return false;
-      }
-
-      HostMaintenanceStateChange other = (HostMaintenanceStateChange) o;
-      return Objects.equal(status, other.status);
+    public IHostAttributes getAttributes() {
+      return attributes;
     }
 
     @Override
     public int hashCode() {
-      return Objects.hashCode(status);
+      return attributes.hashCode();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (!(o instanceof HostAttributesChanged)) {
+        return false;
+      }
+
+      HostAttributesChanged other = (HostAttributesChanged) o;
+      return Objects.equals(attributes, other.getAttributes());
+    }
+
+    @Override
+    public String toString() {
+      return com.google.common.base.Objects.toStringHelper(this)
+          .add("attributes", getAttributes())
+          .toString();
     }
   }
 
   /**
    * Event sent when a scheduling assignment was vetoed.
    */
-  public static class Vetoed implements PubsubEvent {
-    private final String taskId;
+  class Vetoed implements PubsubEvent {
+    private final TaskGroupKey groupKey;
     private final Set<Veto> vetoes;
 
-    public Vetoed(String taskId, Set<Veto> vetoes) {
-      this.taskId = checkNotNull(taskId);
-      this.vetoes = checkNotNull(vetoes);
+    public Vetoed(TaskGroupKey groupKey, Set<Veto> vetoes) {
+      this.groupKey = requireNonNull(groupKey);
+      this.vetoes = requireNonNull(vetoes);
     }
 
-    public String getTaskId() {
-      return taskId;
+    public TaskGroupKey getGroupKey() {
+      return groupKey;
     }
 
     public Set<Veto> getVetoes() {
@@ -212,20 +222,28 @@ public interface PubsubEvent {
       }
 
       Vetoed other = (Vetoed) o;
-      return Objects.equal(taskId, other.taskId)
-          && Objects.equal(vetoes, other.vetoes);
+      return Objects.equals(groupKey, other.groupKey)
+          && Objects.equals(vetoes, other.vetoes);
     }
 
     @Override
     public int hashCode() {
-      return Objects.hashCode(taskId, vetoes);
+      return Objects.hash(groupKey, vetoes);
+    }
+
+    @Override
+    public String toString() {
+      return com.google.common.base.Objects.toStringHelper(this)
+          .add("groupKey", groupKey)
+          .add("vetoes", vetoes)
+          .toString();
     }
   }
 
-  public static class DriverRegistered implements PubsubEvent {
+  class DriverRegistered implements PubsubEvent {
     @Override
     public boolean equals(Object o) {
-      return (o != null) && getClass().equals(o.getClass());
+      return o != null && getClass().equals(o.getClass());
     }
 
     @Override
@@ -234,10 +252,10 @@ public interface PubsubEvent {
     }
   }
 
-  public static class DriverDisconnected implements PubsubEvent {
+  class DriverDisconnected implements PubsubEvent {
     @Override
     public boolean equals(Object o) {
-      return (o != null) && getClass().equals(o.getClass());
+      return o != null && getClass().equals(o.getClass());
     }
 
     @Override
@@ -246,15 +264,56 @@ public interface PubsubEvent {
     }
   }
 
-  public static class SchedulerActive implements PubsubEvent {
+  class TaskStatusReceived implements PubsubEvent {
+    private final Protos.TaskState state;
+    private final Optional<TaskStatus.Source> source;
+    private final Optional<TaskStatus.Reason> reason;
+    private final Optional<Long> epochTimestampMicros;
+
+    public TaskStatusReceived(
+        Protos.TaskState state,
+        Optional<TaskStatus.Source> source,
+        Optional<TaskStatus.Reason> reason,
+        Optional<Long> epochTimestampMicros) {
+
+      this.state = requireNonNull(state);
+      this.source = requireNonNull(source);
+      this.reason = requireNonNull(reason);
+      this.epochTimestampMicros = requireNonNull(epochTimestampMicros);
+    }
+
+    public Protos.TaskState getState() {
+      return state;
+    }
+
+    public Optional<TaskStatus.Source> getSource() {
+      return source;
+    }
+
+    public Optional<TaskStatus.Reason> getReason() {
+      return reason;
+    }
+
+    public Optional<Long> getEpochTimestampMicros() {
+      return epochTimestampMicros;
+    }
+
     @Override
     public boolean equals(Object o) {
-      return (o != null) && getClass().equals(o.getClass());
+      if (!(o instanceof TaskStatusReceived)) {
+        return false;
+      }
+
+      TaskStatusReceived other = (TaskStatusReceived) o;
+      return Objects.equals(state, other.state)
+          && Objects.equals(source, other.source)
+          && Objects.equals(reason, other.reason)
+          && Objects.equals(epochTimestampMicros, other.epochTimestampMicros);
     }
 
     @Override
     public int hashCode() {
-      return getClass().hashCode();
+      return Objects.hash(state, source, reason, epochTimestampMicros);
     }
   }
 }

@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,7 +13,7 @@
  */
 package org.apache.aurora.scheduler.storage;
 
-import javax.annotation.Nullable;
+import com.google.common.base.Optional;
 
 /**
  * Stores data specific to the scheduler itself.
@@ -27,9 +25,9 @@ public interface SchedulerStore {
    *
    * @return the last saved framework id
    */
-  @Nullable String fetchFrameworkId();
+  Optional<String> fetchFrameworkId();
 
-  public interface Mutable extends SchedulerStore {
+  interface Mutable extends SchedulerStore {
     /**
      * Stores the given framework id overwriting any previously saved id.
      *

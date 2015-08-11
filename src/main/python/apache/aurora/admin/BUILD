@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -13,15 +11,39 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+import os
 
 python_library(
-  name = 'host_maintenance',
-  sources = 'host_maintenance.py',
+  name = '_admin',
+  sources = rglobs('*.py'),
   dependencies = [
-    pants('3rdparty/python:twitter.common.log'),
-    pants('3rdparty/python:twitter.common.quantity'),
-    pants('src/main/python/apache/aurora/client:api'),
-    pants('src/main/python/apache/aurora/client:base'),
-    pants('src/main/thrift/org/apache/aurora/gen:py-thrift'),
+    '3rdparty/python:twitter.common.app',
+    '3rdparty/python:twitter.common.log',
+    '3rdparty/python:twitter.common.quantity',
+    'api/src/main/thrift/org/apache/aurora/gen',
+    'src/main/python/apache/aurora/client',
+    'src/main/python/apache/aurora/common',
+    'src/main/python/apache/aurora/config',
   ]
+)
+
+python_binary(
+  name = 'aurora_admin',
+  entry_point = 'apache.aurora.admin.aurora_admin:proxy_main',
+  dependencies = [
+    ':_admin',
+  ]
+)
+
+python_library(
+  name = 'admin',
+  dependencies = [
+    ':_admin',
+  ],
+  provides = setup_py(
+    name = 'apache.aurora.admin',
+    version = open(os.path.join(get_buildroot(), '.auroraversion')).read().strip().upper(),
+  ).with_binaries({
+    'aurora_admin': ':aurora_admin',
+  }),
 )

@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -17,10 +15,20 @@
 python_test_suite(
   name = 'all',
   dependencies = [
-    pants('src/test/python/apache/aurora/admin:all'),
-    pants('src/test/python/apache/aurora/client:all'),
-    pants('src/test/python/apache/aurora/common:all'),
-    pants('src/test/python/apache/aurora/config:all'),
-    pants('src/test/python/apache/aurora/executor:all'),
+    'src/test/python/apache/aurora/admin:all',
+    'src/test/python/apache/aurora/client:all',
+    'src/test/python/apache/aurora/common:all',
+    'src/test/python/apache/aurora/config:all',
+    'src/test/python/apache/aurora/executor:all',
+    'src/test/python/apache/aurora/tools:all',
+  ]
+)
+
+python_library(
+  name = 'api_util',
+  sources = [ 'api_util.py' ],
+  dependencies = [
+    'api/src/main/thrift/org/apache/aurora/gen',
+    'src/main/python/apache/aurora/client',
   ]
 )

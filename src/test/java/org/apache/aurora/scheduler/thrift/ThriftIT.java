@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -34,13 +32,14 @@ import org.apache.aurora.gen.AuroraAdmin;
 import org.apache.aurora.gen.ResourceAggregate;
 import org.apache.aurora.gen.ServerInfo;
 import org.apache.aurora.gen.SessionKey;
+import org.apache.aurora.scheduler.TaskIdGenerator;
+import org.apache.aurora.scheduler.cron.CronJobManager;
 import org.apache.aurora.scheduler.cron.CronPredictor;
-import org.apache.aurora.scheduler.cron.CronScheduler;
 import org.apache.aurora.scheduler.quota.QuotaManager;
 import org.apache.aurora.scheduler.state.LockManager;
 import org.apache.aurora.scheduler.state.MaintenanceController;
-import org.apache.aurora.scheduler.state.SchedulerCore;
 import org.apache.aurora.scheduler.state.StateManager;
+import org.apache.aurora.scheduler.state.UUIDGenerator;
 import org.apache.aurora.scheduler.storage.Storage;
 import org.apache.aurora.scheduler.storage.Storage.NonVolatileStorage;
 import org.apache.aurora.scheduler.storage.backup.Recovery;
@@ -48,7 +47,9 @@ import org.apache.aurora.scheduler.storage.backup.StorageBackup;
 import org.apache.aurora.scheduler.storage.entities.IResourceAggregate;
 import org.apache.aurora.scheduler.storage.entities.IServerInfo;
 import org.apache.aurora.scheduler.storage.testing.StorageTestUtil;
+import org.apache.aurora.scheduler.thrift.aop.AnnotatedAuroraAdmin;
 import org.apache.aurora.scheduler.thrift.auth.ThriftAuthModule;
+import org.apache.aurora.scheduler.updater.JobUpdateController;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -95,7 +96,7 @@ public class ThriftIT extends EasyMockTest {
     }
   };
 
-  private class CapabilityValidatorFake implements CapabilityValidator {
+  private static class CapabilityValidatorFake implements CapabilityValidator {
     private final SessionValidator validator;
 
     CapabilityValidatorFake(SessionValidator validator) {
@@ -139,7 +140,13 @@ public class ThriftIT extends EasyMockTest {
   private void createThrift(Map<Capability, String> capabilities) {
     Injector injector = Guice.createInjector(
         new ThriftModule(),
-        new ThriftAuthModule(capabilities),
+        new ThriftAuthModule(capabilities, new AbstractModule() {
+          @Override
+          protected void configure() {
+            bind(SessionValidator.class).toInstance(validator);
+            bind(CapabilityValidator.class).toInstance(new CapabilityValidatorFake(validator));
+          }
+        }),
         new AbstractModule() {
           private <T> T bindMock(Class<T> clazz) {
             T mock = createMock(clazz);
@@ -149,27 +156,26 @@ public class ThriftIT extends EasyMockTest {
 
           @Override
           protected void configure() {
-            bindMock(CronScheduler.class);
+            bindMock(CronJobManager.class);
             bindMock(MaintenanceController.class);
             bindMock(Recovery.class);
-            bindMock(SchedulerCore.class);
             bindMock(LockManager.class);
             bindMock(ShutdownRegistry.class);
             bindMock(StateManager.class);
+            bindMock(TaskIdGenerator.class);
+            bindMock(UUIDGenerator.class);
+            bindMock(JobUpdateController.class);
             storageTestUtil = new StorageTestUtil(ThriftIT.this);
             bind(Storage.class).toInstance(storageTestUtil.storage);
             bind(NonVolatileStorage.class).toInstance(storageTestUtil.storage);
             bindMock(StorageBackup.class);
-            bindMock(ThriftConfiguration.class);
             bind(QuotaManager.class).toInstance(quotaManager);
-            bind(SessionValidator.class).toInstance(validator);
-            bind(CapabilityValidator.class).toInstance(new CapabilityValidatorFake(validator));
             bind(IServerInfo.class).toInstance(IServerInfo.build(new ServerInfo()));
             bindMock(CronPredictor.class);
           }
         }
     );
-    thrift = injector.getInstance(AuroraAdmin.Iface.class);
+    thrift = injector.getInstance(AnnotatedAuroraAdmin.class);
   }
 
   private void setQuota(String user, boolean allowed) throws Exception {
@@ -181,7 +187,11 @@ public class ThriftIT extends EasyMockTest {
 
   @Test
   public void testProvisionAccess() throws Exception {
-    quotaManager.saveQuota(USER, QUOTA);
+    storageTestUtil.expectOperations();
+    quotaManager.saveQuota(
+        USER,
+        QUOTA,
+        storageTestUtil.mutableStoreProvider);
     expectLastCall().times(2);
 
     control.replay();

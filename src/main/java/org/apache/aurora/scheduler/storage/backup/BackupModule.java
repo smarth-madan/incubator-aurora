@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,6 +14,7 @@
 package org.apache.aurora.scheduler.storage.backup;
 
 import java.io.File;
+import java.util.concurrent.Executor;
 import java.util.logging.Logger;
 
 import javax.inject.Inject;
@@ -35,13 +34,14 @@ import com.twitter.common.quantity.Amount;
 import com.twitter.common.quantity.Time;
 
 import org.apache.aurora.gen.storage.Snapshot;
+import org.apache.aurora.scheduler.base.AsyncUtil;
 import org.apache.aurora.scheduler.storage.SnapshotStore;
 import org.apache.aurora.scheduler.storage.backup.Recovery.RecoveryImpl;
 import org.apache.aurora.scheduler.storage.backup.StorageBackup.StorageBackupImpl;
 import org.apache.aurora.scheduler.storage.backup.StorageBackup.StorageBackupImpl.BackupConfig;
 import org.apache.aurora.scheduler.storage.backup.TemporaryStorage.TemporaryStorageFactory;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
 
 /**
  * A module that will periodically save full storage backups to local disk and makes those backups
@@ -83,12 +83,15 @@ public class BackupModule extends PrivateModule {
    */
   @VisibleForTesting
   public BackupModule(File backupDir, Class<? extends SnapshotStore<Snapshot>> snapshotStore) {
-    this.unvalidatedBackupDir = checkNotNull(backupDir);
-    this.snapshotStore = checkNotNull(snapshotStore);
+    this.unvalidatedBackupDir = requireNonNull(backupDir);
+    this.snapshotStore = requireNonNull(snapshotStore);
   }
 
   @Override
   protected void configure() {
+    Executor executor = AsyncUtil.singleThreadLoggingScheduledExecutor("StorageBackup-%d", LOG);
+    bind(Executor.class).toInstance(executor);
+
     TypeLiteral<SnapshotStore<Snapshot>> type = new TypeLiteral<SnapshotStore<Snapshot>>() { };
     bind(type).annotatedWith(StorageBackupImpl.SnapshotDelegate.class).to(snapshotStore);
 
@@ -111,7 +114,7 @@ public class BackupModule extends PrivateModule {
     private final Lifecycle lifecycle;
 
     @Inject LifecycleHook(Lifecycle lifecycle) {
-      this.lifecycle = checkNotNull(lifecycle);
+      this.lifecycle = requireNonNull(lifecycle);
     }
 
     @Override
@@ -121,13 +124,13 @@ public class BackupModule extends PrivateModule {
   }
 
   @Provides
-  private File provideBackupDir() {
+  File provideBackupDir() {
     if (!unvalidatedBackupDir.exists()) {
-      if (!unvalidatedBackupDir.mkdirs()) {
+      if (unvalidatedBackupDir.mkdirs()) {
+        LOG.info("Created backup dir " + unvalidatedBackupDir.getPath() + ".");
+      } else {
         throw new IllegalArgumentException(
             "Unable to create backup dir " + unvalidatedBackupDir.getPath() + ".");
-      } else {
-        LOG.info("Created backup dir " + unvalidatedBackupDir.getPath() + ".");
       }
     }
 
@@ -140,7 +143,7 @@ public class BackupModule extends PrivateModule {
   }
 
   @Provides
-  private BackupConfig provideBackupConfig(File backupDir) {
+  BackupConfig provideBackupConfig(File backupDir) {
     return new BackupConfig(backupDir, MAX_SAVED_BACKUPS.get(), BACKUP_INTERVAL.get());
   }
 }

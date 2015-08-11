@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -13,98 +11,48 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
 import os
 
-# Create an alias for the previous target
+
 python_library(
-  name = 'api',
+  name = '_client',
+  sources = rglobs('*.py'),
   dependencies = [
-    pants('src/main/python/apache/aurora/client/api')
-  ]
+    '3rdparty/python:pex',
+    '3rdparty/python:pystachio',
+    '3rdparty/python:requests',
+    '3rdparty/python:twitter.common.app',
+    '3rdparty/python:twitter.common.decorators',
+    '3rdparty/python:twitter.common.lang',
+    '3rdparty/python:twitter.common.log',
+    '3rdparty/python:twitter.common.quantity',
+    '3rdparty/python:twitter.common.zookeeper',
+    'api/src/main/thrift/org/apache/aurora/gen',
+    'src/main/python/apache/aurora/common',
+    'src/main/python/apache/aurora/config',
+    'src/main/python/apache/thermos/common',
+    'src/main/python/apache/thermos/config',
+    'src/main/resources/apache/aurora/client/cli:auroraversion',
+  ],
+)
+
+python_binary(
+  name='aurora',
+  entry_point = 'apache.aurora.client.cli.client:proxy_main',
+  dependencies = [
+    ':_client'
+  ],
 )
 
 python_library(
-  name = 'base',
-  sources = ['base.py'],
+  name = 'client',
   dependencies = [
-    pants('3rdparty/python:twitter.common.app'),
-    pants('3rdparty/python:twitter.common.log'),
-    pants('src/main/thrift/org/apache/aurora/gen:py-thrift'),
-  ]
-)
-
-python_library(
-  name = 'binding_helper',
-  sources = ['binding_helper.py'],
-  dependencies = [
-    pants('3rdparty/python:twitter.common.lang'),
-  ]
-)
-
-python_library(
-  name = 'config',
-  sources = ['config.py'],
-  dependencies = [
-    pants(':base'),
-    pants(':binding_helper'),
-    pants('3rdparty/python:pystachio'),
-    pants('3rdparty/python:twitter.common.app'),
-    pants('3rdparty/python:twitter.common.log'),
-    pants('src/main/python/apache/aurora/config'),
-    pants('src/main/thrift/org/apache/aurora/gen:py-thrift'),
-  ]
-)
-
-python_library(
-  name = 'factory',
-  sources = ['factory.py'],
-  dependencies = [
-    pants(':base'),
-    pants('3rdparty/python:twitter.common.app'),
-    pants('src/main/python/apache/aurora/client/hooks'),
-    pants('src/main/python/apache/aurora/common:cluster'),
-    pants('src/main/python/apache/aurora/common:clusters'),
-  ]
-)
-
-python_library(
-  name = 'options',
-  sources = ['options.py'],
-  dependencies = [
-    pants('src/main/python/apache/thermos/common:options'),
-    pants('src/main/python/apache/aurora/common:aurora_job_key'),
-  ]
-)
-
-python_library(
-  name = 'client-packaged',
-  dependencies = [
-    pants('src/main/python/apache/aurora/common'),
-    pants('src/main/python/apache/aurora/config:config-packaged'),
-    pants('src/main/python/apache/thermos/common'),
+    ':_client',
   ],
   provides = setup_py(
     name = 'apache.aurora.client',
     version = open(os.path.join(get_buildroot(), '.auroraversion')).read().strip().upper(),
-  ).with_binaries(
-    aurora_admin = pants('src/main/python/apache/aurora/client/bin:aurora_admin'),
-    aurora = pants('src/main/python/apache/aurora/client/bin:aurora_client'),
-  )
+  ).with_binaries({
+    'aurora': ':aurora',
+  }),
 )
-
-python_library(
-  name = 'clientv2-packaged',
-  dependencies = [
-    pants('src/main/python/apache/aurora/common'),
-    pants('src/main/python/apache/aurora/config'),
-    pants('src/main/python/apache/thermos/common'),
-  ],
-  provides = setup_py(
-    name = 'apache.aurora.clientv2',
-    version = open(os.path.join(get_buildroot(), '.auroraversion')).read().strip().upper(),
-  ).with_binaries(
-    aurora_client_v2 = pants('src/main/python/apache/aurora/client/cli:client'),
-  )
-)
-

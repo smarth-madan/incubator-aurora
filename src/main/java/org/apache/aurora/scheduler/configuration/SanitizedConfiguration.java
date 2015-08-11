@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,19 +13,16 @@
  */
 package org.apache.aurora.scheduler.configuration;
 
-import java.util.Map;
+import java.util.Set;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Functions;
 import com.google.common.base.Objects;
 import com.google.common.collect.ContiguousSet;
 import com.google.common.collect.DiscreteDomain;
-import com.google.common.collect.Maps;
 import com.google.common.collect.Range;
 
 import org.apache.aurora.scheduler.configuration.ConfigurationManager.TaskDescriptionException;
 import org.apache.aurora.scheduler.storage.entities.IJobConfiguration;
-import org.apache.aurora.scheduler.storage.entities.ITaskConfig;
 
 /**
  * Wrapper for a configuration that has been fully-sanitized and populated with defaults.
@@ -35,22 +30,20 @@ import org.apache.aurora.scheduler.storage.entities.ITaskConfig;
 public final class SanitizedConfiguration {
 
   private final IJobConfiguration sanitized;
-  private final Map<Integer, ITaskConfig> tasks;
+  private final Set<Integer> instanceIds;
 
   /**
-   * Constructs a SanitizedConfiguration object and populates the set of {@link ITaskConfig}s for
-   * the provided config.
+   * Constructs a SanitizedConfiguration object and populates the set of instance IDs for
+   * the provided {@link org.apache.aurora.scheduler.storage.entities.ITaskConfig}.
    *
    * @param sanitized A sanitized configuration.
    */
   @VisibleForTesting
   public SanitizedConfiguration(IJobConfiguration sanitized) {
     this.sanitized = sanitized;
-    this.tasks = Maps.toMap(
-        ContiguousSet.create(
-            Range.closedOpen(0, sanitized.getInstanceCount()),
-            DiscreteDomain.integers()),
-        Functions.constant(sanitized.getTaskConfig()));
+    this.instanceIds = ContiguousSet.create(
+        Range.closedOpen(0, sanitized.getInstanceCount()),
+        DiscreteDomain.integers());
   }
 
   /**
@@ -70,9 +63,17 @@ public final class SanitizedConfiguration {
     return sanitized;
   }
 
-  // TODO(William Farner): Rework this API now that all configs are identical.
-  public Map<Integer, ITaskConfig> getTaskConfigs() {
-    return tasks;
+  public Set<Integer> getInstanceIds() {
+    return instanceIds;
+  }
+
+  /**
+   * Determines whether this job is configured as a cron job.
+   *
+   * @return {@code true} if this is a cron job, otherwise {@code false}.
+   */
+  public boolean isCron() {
+    return getJobConfig().isSetCronSchedule();
   }
 
   @Override

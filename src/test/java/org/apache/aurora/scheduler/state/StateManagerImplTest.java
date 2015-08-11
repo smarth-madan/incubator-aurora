@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,6 +14,7 @@
 package org.apache.aurora.scheduler.state;
 
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
 
@@ -30,25 +29,30 @@ import com.twitter.common.testing.easymock.EasyMockTest;
 import com.twitter.common.util.testing.FakeClock;
 
 import org.apache.aurora.gen.AssignedTask;
-import org.apache.aurora.gen.Identity;
+import org.apache.aurora.gen.Attribute;
+import org.apache.aurora.gen.HostAttributes;
+import org.apache.aurora.gen.MaintenanceMode;
 import org.apache.aurora.gen.ScheduleStatus;
 import org.apache.aurora.gen.ScheduledTask;
-import org.apache.aurora.gen.TaskConfig;
 import org.apache.aurora.gen.TaskEvent;
-import org.apache.aurora.scheduler.Driver;
 import org.apache.aurora.scheduler.TaskIdGenerator;
-import org.apache.aurora.scheduler.async.RescheduleCalculator;
 import org.apache.aurora.scheduler.base.Query;
+import org.apache.aurora.scheduler.base.TaskTestUtil;
 import org.apache.aurora.scheduler.base.Tasks;
 import org.apache.aurora.scheduler.events.EventSink;
 import org.apache.aurora.scheduler.events.PubsubEvent;
 import org.apache.aurora.scheduler.events.PubsubEvent.TaskStateChange;
 import org.apache.aurora.scheduler.events.PubsubEvent.TasksDeleted;
+import org.apache.aurora.scheduler.mesos.Driver;
+import org.apache.aurora.scheduler.scheduling.RescheduleCalculator;
+import org.apache.aurora.scheduler.storage.AttributeStore;
 import org.apache.aurora.scheduler.storage.Storage;
+import org.apache.aurora.scheduler.storage.db.DbUtil;
+import org.apache.aurora.scheduler.storage.entities.IHostAttributes;
 import org.apache.aurora.scheduler.storage.entities.IScheduledTask;
 import org.apache.aurora.scheduler.storage.entities.ITaskConfig;
-import org.apache.aurora.scheduler.storage.mem.MemStorage;
 import org.apache.mesos.Protos.SlaveID;
+import org.easymock.Capture;
 import org.easymock.EasyMock;
 import org.easymock.IAnswer;
 import org.easymock.IArgumentMatcher;
@@ -57,25 +61,34 @@ import org.junit.Test;
 
 import static org.apache.aurora.gen.ScheduleStatus.ASSIGNED;
 import static org.apache.aurora.gen.ScheduleStatus.FAILED;
+import static org.apache.aurora.gen.ScheduleStatus.FINISHED;
 import static org.apache.aurora.gen.ScheduleStatus.INIT;
+import static org.apache.aurora.gen.ScheduleStatus.KILLED;
 import static org.apache.aurora.gen.ScheduleStatus.KILLING;
 import static org.apache.aurora.gen.ScheduleStatus.LOST;
 import static org.apache.aurora.gen.ScheduleStatus.PENDING;
 import static org.apache.aurora.gen.ScheduleStatus.RUNNING;
 import static org.apache.aurora.gen.ScheduleStatus.THROTTLED;
-import static org.apache.aurora.gen.ScheduleStatus.UNKNOWN;
-import static org.apache.aurora.gen.apiConstants.DEFAULT_ENVIRONMENT;
+import static org.apache.aurora.scheduler.state.StateChangeResult.ILLEGAL;
+import static org.apache.aurora.scheduler.state.StateChangeResult.INVALID_CAS_STATE;
+import static org.apache.aurora.scheduler.state.StateChangeResult.NOOP;
+import static org.apache.aurora.scheduler.state.StateChangeResult.SUCCESS;
+import static org.easymock.EasyMock.capture;
 import static org.easymock.EasyMock.expect;
 import static org.easymock.EasyMock.expectLastCall;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
 
 public class StateManagerImplTest extends EasyMockTest {
 
-  private static final String HOST_A = "host_a";
-  private static final Identity JIM = new Identity("jim", "jim-user");
-  private static final String MY_JOB = "myJob";
+  private static final IHostAttributes HOST_A = IHostAttributes.build(
+      new HostAttributes(
+          "hostA",
+          ImmutableSet.of(new Attribute("zone", ImmutableSet.of("1a"))))
+          .setSlaveId("slaveIdA")
+          .setMode(MaintenanceMode.NONE));
+  private static final ITaskConfig NON_SERVICE_CONFIG =
+      setIsService(TaskTestUtil.makeConfig(TaskTestUtil.JOB), false);
+  private static final ITaskConfig SERVICE_CONFIG = setIsService(NON_SERVICE_CONFIG, true);
 
   private Driver driver;
   private TaskIdGenerator taskIdGenerator;
@@ -92,14 +105,20 @@ public class StateManagerImplTest extends EasyMockTest {
     eventSink = createMock(EventSink.class);
     rescheduleCalculator = createMock(RescheduleCalculator.class);
     // TODO(William Farner): Use a mocked storage.
-    storage = MemStorage.newEmptyStorage();
+    storage = DbUtil.createStorage();
     stateManager = new StateManagerImpl(
-        storage,
         clock,
         driver,
         taskIdGenerator,
         eventSink,
         rescheduleCalculator);
+    storage.write(new Storage.MutateWork.NoResult.Quiet() {
+      @Override
+      public void execute(Storage.MutableStoreProvider storeProvider) {
+        AttributeStore.Mutable attributeStore = storeProvider.getAttributeStore();
+        attributeStore.saveHostAttributes(HOST_A);
+      }
+    });
   }
 
   private static class StateChangeMatcher implements IArgumentMatcher {
@@ -166,14 +185,13 @@ public class StateManagerImplTest extends EasyMockTest {
 
   @Test
   public void testAddTasks() {
-    ITaskConfig task = makeTask(JIM, MY_JOB);
     String taskId = "a";
-    expect(taskIdGenerator.generate(task, 3)).andReturn(taskId);
+    expect(taskIdGenerator.generate(NON_SERVICE_CONFIG, 3)).andReturn(taskId);
     expectStateTransitions(taskId, INIT, PENDING);
 
     control.replay();
 
-    insertTask(task, 3);
+    insertTask(NON_SERVICE_CONFIG, 3);
     ScheduledTask expected = new ScheduledTask()
         .setStatus(PENDING)
         .setTaskEvents(ImmutableList.of(new TaskEvent()
@@ -181,53 +199,68 @@ public class StateManagerImplTest extends EasyMockTest {
             .setScheduler(StateManagerImpl.LOCAL_HOST_SUPPLIER.get())
             .setStatus(PENDING)))
         .setAssignedTask(new AssignedTask()
+            .setAssignedPorts(ImmutableMap.of())
             .setInstanceId(3)
             .setTaskId(taskId)
-            .setTask(task.newBuilder()));
-    assertEquals(ImmutableSet.of(IScheduledTask.build(expected)),
-        Storage.Util.consistentFetchTasks(storage, Query.taskScoped(taskId)));
+            .setTask(NON_SERVICE_CONFIG.newBuilder()));
+    assertEquals(
+        ImmutableSet.of(IScheduledTask.build(expected)),
+        Storage.Util.fetchTasks(storage, Query.taskScoped(taskId)));
   }
 
   @Test
   public void testKillPendingTask() {
-    ITaskConfig task = makeTask(JIM, MY_JOB);
     String taskId = "a";
-    expect(taskIdGenerator.generate(task, 0)).andReturn(taskId);
+    expect(taskIdGenerator.generate(NON_SERVICE_CONFIG, 0)).andReturn(taskId);
     expectStateTransitions(taskId, INIT, PENDING);
     eventSink.post(matchTasksDeleted(taskId));
 
     control.replay();
 
-    insertTask(task, 0);
-    assertEquals(true, changeState(taskId, KILLING));
-    assertEquals(false, changeState(taskId, KILLING));
+    insertTask(NON_SERVICE_CONFIG, 0);
+    assertEquals(SUCCESS, changeState(taskId, KILLING));
+    assertEquals(ILLEGAL, changeState(taskId, KILLING));
+  }
+
+  @Test
+  public void testKillRunningTask() {
+    String taskId = "a";
+    expect(taskIdGenerator.generate(NON_SERVICE_CONFIG, 0)).andReturn(taskId);
+    expectStateTransitions(taskId, INIT, PENDING, ASSIGNED, RUNNING, KILLING, KILLED);
+    driver.killTask(EasyMock.anyObject());
+
+    control.replay();
+
+    insertTask(NON_SERVICE_CONFIG, 0);
+    assignTask(taskId, HOST_A);
+    assertEquals(SUCCESS, changeState(taskId, RUNNING));
+    assertEquals(SUCCESS, changeState(taskId, KILLING));
+    assertEquals(SUCCESS, changeState(taskId, KILLED));
+    assertEquals(NOOP, changeState(taskId, KILLED));
   }
 
   @Test
   public void testLostKillingTask() {
-    ITaskConfig task = makeTask(JIM, MY_JOB);
     String taskId = "a";
-    expect(taskIdGenerator.generate(task, 0)).andReturn(taskId);
-    expectStateTransitions(taskId, INIT, PENDING, ASSIGNED, RUNNING, KILLING);
-    eventSink.post(matchTasksDeleted(taskId));
+    expect(taskIdGenerator.generate(NON_SERVICE_CONFIG, 0)).andReturn(taskId);
+    expectStateTransitions(taskId, INIT, PENDING, ASSIGNED, RUNNING, KILLING, LOST);
 
-    driver.killTask(EasyMock.<String>anyObject());
+    driver.killTask(EasyMock.anyObject());
 
     control.replay();
 
-    insertTask(task, 0);
+    insertTask(NON_SERVICE_CONFIG, 0);
 
     assignTask(taskId, HOST_A);
     changeState(taskId, RUNNING);
     changeState(taskId, KILLING);
-    changeState(taskId, UNKNOWN);
+    changeState(taskId, LOST);
   }
 
   @Test
   public void testNestedEvents() {
     final String id = "a";
-    ITaskConfig task = makeTask(JIM, MY_JOB);
-    expect(taskIdGenerator.generate(task, 0)).andReturn(id);
+    expect(taskIdGenerator.generate(NON_SERVICE_CONFIG, 0)).andReturn(id);
 
     // Trigger an event that produces a side-effect and a PubSub event .
     eventSink.post(matchStateChange(id, INIT, PENDING));
@@ -244,33 +277,35 @@ public class StateManagerImplTest extends EasyMockTest {
 
     control.replay();
 
-    insertTask(task, 0);
+    insertTask(NON_SERVICE_CONFIG, 0);
   }
 
   @Test
-  public void testDeleteTask() {
-    ITaskConfig task = makeTask(JIM, MY_JOB);
+  public void testDeletePendingTask() {
     String taskId = "a";
-    expect(taskIdGenerator.generate(task, 0)).andReturn(taskId);
+    expect(taskIdGenerator.generate(NON_SERVICE_CONFIG, 0)).andReturn(taskId);
     expectStateTransitions(taskId, INIT, PENDING);
     eventSink.post(matchTasksDeleted(taskId));
 
     control.replay();
 
-    insertTask(task, 0);
-    stateManager.deleteTasks(ImmutableSet.of(taskId));
+    insertTask(NON_SERVICE_CONFIG, 0);
+    changeState(taskId, KILLING);
+  }
+
+  private static ITaskConfig setIsService(ITaskConfig config, boolean service) {
+    return ITaskConfig.build(config.newBuilder().setIsService(service));
   }
 
   @Test
   public void testThrottleTask() {
-    ITaskConfig task = ITaskConfig.build(makeTask(JIM, MY_JOB).newBuilder().setIsService(true));
+    ITaskConfig task = setIsService(NON_SERVICE_CONFIG, true);
     String taskId = "a";
     expect(taskIdGenerator.generate(task, 0)).andReturn(taskId);
     expectStateTransitions(taskId, INIT, PENDING, ASSIGNED, RUNNING, FAILED);
     String newTaskId = "b";
     expect(taskIdGenerator.generate(task, 0)).andReturn(newTaskId);
-    expect(rescheduleCalculator.getFlappingPenaltyMs(EasyMock.<IScheduledTask>anyObject()))
-        .andReturn(100L);
+    expect(rescheduleCalculator.getFlappingPenaltyMs(EasyMock.anyObject())).andReturn(100L);
     expectStateTransitions(newTaskId, INIT, THROTTLED);
 
     control.replay();
@@ -293,89 +328,196 @@ public class StateManagerImplTest extends EasyMockTest {
   }
 
   private void noFlappingPenalty() {
-    expect(rescheduleCalculator.getFlappingPenaltyMs(EasyMock.<IScheduledTask>anyObject()))
-        .andReturn(0L);
+    expect(rescheduleCalculator.getFlappingPenaltyMs(EasyMock.anyObject())).andReturn(0L);
   }
 
   @Test
   public void testIncrementFailureCount() {
-    ITaskConfig task = ITaskConfig.build(makeTask(JIM, MY_JOB).newBuilder().setIsService(true));
     String taskId = "a";
-    expect(taskIdGenerator.generate(task, 0)).andReturn(taskId);
+    expect(taskIdGenerator.generate(SERVICE_CONFIG, 0)).andReturn(taskId);
     expectStateTransitions(taskId, INIT, PENDING, ASSIGNED, RUNNING, FAILED);
 
     String taskId2 = "a2";
-    expect(taskIdGenerator.generate(task, 0)).andReturn(taskId2);
+    expect(taskIdGenerator.generate(SERVICE_CONFIG, 0)).andReturn(taskId2);
     noFlappingPenalty();
     expectStateTransitions(taskId2, INIT, PENDING);
 
     control.replay();
 
-    insertTask(task, 0);
+    insertTask(SERVICE_CONFIG, 0);
 
     assignTask(taskId, HOST_A);
     changeState(taskId, RUNNING);
     changeState(taskId, FAILED);
     IScheduledTask rescheduledTask = Iterables.getOnlyElement(
-        Storage.Util.consistentFetchTasks(storage, Query.taskScoped(taskId2)));
+        Storage.Util.fetchTasks(storage, Query.taskScoped(taskId2)));
+    assertEquals(taskId, rescheduledTask.getAncestorId());
     assertEquals(1, rescheduledTask.getFailureCount());
   }
 
-  @Test
-  public void testDoubleTransition() {
-    // Tests that a transition inducing another transition (STATE_CHANGE action) is performed.
-
-    ITaskConfig task = makeTask(JIM, MY_JOB);
-    String taskId = "a";
-    expect(taskIdGenerator.generate(task, 0)).andReturn(taskId);
-    expectStateTransitions(taskId, INIT, PENDING, ASSIGNED, RUNNING, LOST);
-
-    String taskId2 = "a2";
-    expect(taskIdGenerator.generate(task, 0)).andReturn(taskId2);
-    noFlappingPenalty();
-    expectStateTransitions(taskId2, INIT, PENDING);
-
-    control.replay();
-
-    insertTask(task, 0);
-
-    assignTask(taskId, HOST_A);
-    changeState(taskId, RUNNING);
-    changeState(taskId, UNKNOWN);
+  private static ITaskConfig setMaxFailures(ITaskConfig config, int maxFailures) {
+    return ITaskConfig.build(config.newBuilder().setMaxTaskFailures(maxFailures));
   }
 
   @Test
   public void testCasTaskPresent() {
-    ITaskConfig task = makeTask(JIM, MY_JOB);
     String taskId = "a";
-    expect(taskIdGenerator.generate(task, 0)).andReturn(taskId);
+    ITaskConfig config = setMaxFailures(NON_SERVICE_CONFIG, 1);
+    expect(taskIdGenerator.generate(config, 0)).andReturn(taskId);
     expectStateTransitions(taskId, INIT, PENDING, ASSIGNED, FAILED);
 
     control.replay();
 
-    insertTask(task, 0);
+    insertTask(config, 0);
     assignTask(taskId, HOST_A);
-    assertFalse(stateManager.changeState(
+    assertEquals(INVALID_CAS_STATE, changeState(
         taskId,
         Optional.of(PENDING),
         RUNNING,
-        Optional.<String>absent()));
-    assertTrue(stateManager.changeState(
+        Optional.absent()));
+    assertEquals(SUCCESS, changeState(
         taskId,
         Optional.of(ASSIGNED),
         FAILED,
-        Optional.<String>absent()));
+        Optional.absent()));
   }
 
   @Test
   public void testCasTaskNotFound() {
     control.replay();
 
-    assertFalse(stateManager.changeState(
+    assertEquals(INVALID_CAS_STATE, changeState(
         "a",
         Optional.of(PENDING),
         ASSIGNED,
-        Optional.<String>absent()));
+        Optional.absent()));
+  }
+
+  @Test
+  public void testDeleteTasks() {
+    final String taskId = "a";
+    expect(taskIdGenerator.generate(NON_SERVICE_CONFIG, 0)).andReturn(taskId);
+    expectStateTransitions(taskId, INIT, PENDING, ASSIGNED, RUNNING, FINISHED);
+    eventSink.post(matchTasksDeleted(taskId));
+
+    control.replay();
+
+    insertTask(NON_SERVICE_CONFIG, 0);
+    assignTask(taskId, HOST_A);
+    changeState(taskId, RUNNING);
+    changeState(taskId, FINISHED);
+    storage.write(new Storage.MutateWork.NoResult.Quiet() {
+      @Override
+      public void execute(Storage.MutableStoreProvider storeProvider) {
+        stateManager.deleteTasks(storeProvider, ImmutableSet.of(taskId));
+      }
+    });
+  }
+
+  private static ITaskConfig setRequestedPorts(ITaskConfig config, Set<String> portNames) {
+    return ITaskConfig.build(config.newBuilder().setRequestedPorts(portNames));
+  }
+
+  @Test
+  public void testPortResource() throws Exception {
+    Set<String> requestedPorts = ImmutableSet.of("one", "two", "three");
+    ITaskConfig task = setRequestedPorts(NON_SERVICE_CONFIG, requestedPorts);
+
+    String taskId = "a";
+    expect(taskIdGenerator.generate(task, 0)).andReturn(taskId);
+    expectStateTransitions(taskId, INIT, PENDING, ASSIGNED);
+
+    control.replay();
+
+    insertTask(task, 0);
+    assignTask(taskId, HOST_A, ImmutableMap.of("one", 80, "two", 81, "three", 82));
+
+    IScheduledTask actual = Iterables.getOnlyElement(
+        Storage.Util.fetchTasks(storage, Query.taskScoped(taskId)));
+
+    assertEquals(
+        requestedPorts,
+        actual.getAssignedTask().getTask().getRequestedPorts());
+  }
+
+  @Test
+  public void testPortResourceResetAfterReschedule() throws Exception {
+    Set<String> requestedPorts = ImmutableSet.of("one");
+    ITaskConfig task = setRequestedPorts(NON_SERVICE_CONFIG, requestedPorts);
+
+    String taskId = "a";
+    expect(taskIdGenerator.generate(task, 0)).andReturn(taskId);
+    expectStateTransitions(taskId, INIT, PENDING, ASSIGNED, RUNNING, LOST);
+
+    String newTaskId = "b";
+    expect(taskIdGenerator.generate(task, 0)).andReturn(newTaskId);
+    expectStateTransitions(newTaskId, INIT, PENDING, ASSIGNED);
+    noFlappingPenalty();
+
+    control.replay();
+
+    insertTask(task, 0);
+    assignTask(taskId, HOST_A, ImmutableMap.of("one", 80));
+    changeState(taskId, RUNNING);
+    changeState(taskId, LOST);
+
+    assignTask(newTaskId, HOST_A, ImmutableMap.of("one", 86));
+
+    IScheduledTask actual = Iterables.getOnlyElement(
+        Storage.Util.fetchTasks(storage, Query.taskScoped(newTaskId)));
+
+    assertEquals(ImmutableMap.of("one", 86), actual.getAssignedTask().getAssignedPorts());
+  }
+
+  @Test(expected = IllegalArgumentException.class)
+  public void insertEmptyPendingInstancesFails() {
+    control.replay();
+    storage.write(new Storage.MutateWork.NoResult.Quiet() {
+      @Override
+      public void execute(Storage.MutableStoreProvider storeProvider) {
+        stateManager.insertPendingTasks(
+            storeProvider,
+            NON_SERVICE_CONFIG,
+            ImmutableSet.of());
+      }
+    });
+  }
+
+  @Test(expected = IllegalArgumentException.class)
+  public void insertPendingInstancesInstanceCollision() {
+    String taskId = "a";
+    expect(taskIdGenerator.generate(NON_SERVICE_CONFIG, 0)).andReturn(taskId).times(2);
+    expectStateTransitions(taskId, INIT, PENDING);
+
+    control.replay();
+
+    insertTask(NON_SERVICE_CONFIG, 0);
+    Iterables.getOnlyElement(Storage.Util.fetchTasks(storage, Query.taskScoped(taskId)));
+
+    insertTask(NON_SERVICE_CONFIG, 0);
+  }
+
+  @Test
+  public void testAssignTaskPubsub() {
+    // This test ensures the pubsub events emitted by assigning tasks have slave id and host set.
+    String taskId = "a";
+
+    expect(taskIdGenerator.generate(NON_SERVICE_CONFIG, 0)).andReturn(taskId);
+
+    expectStateTransitions(taskId, INIT, PENDING);
+
+    Capture<TaskStateChange> taskStateChangeCapture = createCapture();
+    eventSink.post(capture(taskStateChangeCapture));
+
+    control.replay();
+
+    insertTask(NON_SERVICE_CONFIG, 0);
+    assignTask(taskId, HOST_A);
+
+    TaskStateChange change = taskStateChangeCapture.getValue();
+    assertEquals(ASSIGNED, change.getNewState());
+    assertEquals(HOST_A.getHost(), change.getTask().getAssignedTask().getSlaveHost());
+    assertEquals(HOST_A.getSlaveId(), change.getTask().getAssignedTask().getSlaveId());
   }
 
   private void expectStateTransitions(
@@ -400,28 +542,61 @@ public class StateManagerImplTest extends EasyMockTest {
     }
   }
 
-  private void insertTask(ITaskConfig task, int instanceId) {
-    stateManager.insertPendingTasks(ImmutableMap.of(instanceId, task));
+  private void insertTask(final ITaskConfig task, final int instanceId) {
+    storage.write(new Storage.MutateWork.NoResult.Quiet() {
+      @Override
+      public void execute(Storage.MutableStoreProvider storeProvider) {
+        stateManager.insertPendingTasks(storeProvider, task, ImmutableSet.of(instanceId));
+      }
+    });
   }
 
-  private boolean changeState(String taskId, ScheduleStatus status) {
-    return stateManager.changeState(
+  private StateChangeResult changeState(
+      final String taskId,
+      final Optional<ScheduleStatus> casState,
+      final ScheduleStatus newState,
+      final Optional<String> auditMessage) {
+
+    return storage.write(new Storage.MutateWork.Quiet<StateChangeResult>() {
+      @Override
+      public StateChangeResult apply(Storage.MutableStoreProvider storeProvider) {
+        return stateManager.changeState(
+            storeProvider,
+            taskId,
+            casState,
+            newState,
+            auditMessage);
+      }
+    });
+  }
+
+  private StateChangeResult changeState(final String taskId, final ScheduleStatus status) {
+    return changeState(
         taskId,
-        Optional.<ScheduleStatus>absent(),
+        Optional.absent(),
         status,
-        Optional.<String>absent());
+        Optional.absent());
   }
 
-  private static ITaskConfig makeTask(Identity owner, String job) {
-    return ITaskConfig.build(new TaskConfig()
-        .setOwner(owner)
-        .setEnvironment(DEFAULT_ENVIRONMENT)
-        .setJobName(job)
-        .setRequestedPorts(ImmutableSet.<String>of()));
+  private void assignTask(String taskId, IHostAttributes host) {
+    assignTask(taskId, host, ImmutableMap.of());
   }
 
-  private void assignTask(String taskId, String host) {
-    stateManager.assignTask(taskId, host, SlaveID.newBuilder().setValue(host).build(),
-        ImmutableSet.<Integer>of());
+  private void assignTask(
+      final String taskId,
+      final IHostAttributes host,
+      final Map<String, Integer> ports) {
+
+    storage.write(new Storage.MutateWork.NoResult.Quiet() {
+      @Override
+      public void execute(Storage.MutableStoreProvider storeProvider) {
+        stateManager.assignTask(
+            storeProvider,
+            taskId,
+            host.getHost(),
+            SlaveID.newBuilder().setValue(host.getSlaveId()).build(),
+            ports);
+      }
+    });
   }
 }

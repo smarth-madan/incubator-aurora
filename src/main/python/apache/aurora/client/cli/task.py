@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -18,57 +16,24 @@
 """
 
 from __future__ import print_function
-from datetime import datetime
-import json
-import os
-import pprint
-import subprocess
-import sys
-import time
 
-from apache.aurora.client.api.command_runner import DistributedCommandRunner
-from apache.aurora.client.api.job_monitor import JobMonitor
-from apache.aurora.client.api.updater_util import UpdaterConfig
-from apache.aurora.client.cli import (
-    EXIT_COMMAND_FAILURE,
-    EXIT_INVALID_CONFIGURATION,
-    EXIT_INVALID_PARAMETER,
-    EXIT_OK,
-    Noun,
-    Verb,
+import subprocess
+
+from apache.aurora.client.api.command_runner import (
+    DistributedCommandRunner,
+    InstanceDistributedCommandRunner
 )
+from apache.aurora.client.base import combine_messages
+from apache.aurora.client.cli import EXIT_INVALID_PARAMETER, EXIT_OK, Noun, Verb
 from apache.aurora.client.cli.context import AuroraCommandContext
 from apache.aurora.client.cli.options import (
-    BATCH_OPTION,
-    BIND_OPTION,
-    BROWSER_OPTION,
-    CommandOption,
-    CONFIG_ARGUMENT,
     EXECUTOR_SANDBOX_OPTION,
-    FORCE_OPTION,
-    HEALTHCHECK_OPTION,
-    INSTANCES_OPTION,
-    JOBSPEC_ARGUMENT,
-    JSON_READ_OPTION,
-    JSON_WRITE_OPTION,
+    INSTANCES_SPEC_ARGUMENT,
     SSH_USER_OPTION,
     TASK_INSTANCE_ARGUMENT,
-    WATCH_OPTION,
+    CommandOption
 )
-from apache.aurora.common.aurora_job_key import AuroraJobKey
 from apache.aurora.common.clusters import CLUSTERS
-
-from gen.apache.aurora.constants import ACTIVE_STATES, AURORA_EXECUTOR_NAME
-from gen.apache.aurora.ttypes import (
-    ExecutorConfig,
-    ResponseCode,
-    ScheduleStatus,
-)
-
-from pystachio.config import Config
-from thrift.TSerialization import serialize
-from thrift.protocol import TJSONProtocol
-
 
 
 class RunCommand(Verb):
@@ -78,13 +43,9 @@ class RunCommand(Verb):
 
   @property
   def help(self):
-    return """Usage: aurora task run cluster/role/env/job cmd
-
-  Runs a shell command on all machines currently hosting instances of a single job.
-
+    return """runs a shell command on machines currently hosting instances of a single job.
   This feature supports the same command line wildcards that are used to
   populate a job's commands.
-
   This means anything in the {{mesos.*}} and {{thermos.*}} namespaces.
   """
 
@@ -94,17 +55,18 @@ class RunCommand(Verb):
             help='Number of threads to use'),
         SSH_USER_OPTION,
         EXECUTOR_SANDBOX_OPTION,
-        JOBSPEC_ARGUMENT,
-        CommandOption('cmd', type=str)
+        INSTANCES_SPEC_ARGUMENT,
+        CommandOption('cmd', type=str, metavar="unix_command_line")
     ]
 
   def execute(self, context):
-    # TODO(mchucarroll): add options to specify which instances to run on (AURORA-198)
-    cluster_name, role, env, name = context.options.jobspec
+    (cluster_name, role, env, name), instances = context.options.instance_spec
     cluster = CLUSTERS[cluster_name]
-    dcr = DistributedCommandRunner(cluster, role, env, [name], context.options.ssh_user)
+    dcr = InstanceDistributedCommandRunner(cluster, role, env, name,
+        context.options.ssh_user, instances)
     dcr.run(context.options.cmd, parallelism=context.options.num_threads,
         executor_sandbox=context.options.executor_sandbox)
+    return EXIT_OK
 
 
 class SshCommand(Verb):
@@ -114,9 +76,7 @@ class SshCommand(Verb):
 
   @property
   def help(self):
-    return """usage: aurora task ssh cluster/role/env/job/instance [args...]
-
-  Initiate an SSH session on the machine that a task instance is running on.
+    return """initiates an SSH session on the machine that a task instance is running on.
   """
 
   def get_options(self):
@@ -127,6 +87,7 @@ class SshCommand(Verb):
             default=[],
             help="Add tunnel from local port PART to remote named port NAME"),
         CommandOption('--command', '-c', dest='command', type=str, default=None,
+            metavar="unix_command_line",
             help="Command to execute through the ssh connection."),
         TASK_INSTANCE_ARGUMENT
     ]
@@ -136,28 +97,35 @@ class SshCommand(Verb):
     instance = context.options.task_instance.instance
 
     api = context.get_api(cluster)
-    resp = api.query(api.build_query(role, name, set([int(instance)]), env=env))
-    if resp.responseCode != ResponseCode.OK:
-      raise context.CommandError('Unable to get information about instance: %s' % resp.message)
+    resp = api.query(api.build_query(role, name, env=env, instances=set([int(instance)])))
+    context.log_response_and_raise(resp,
+        err_msg=('Unable to get information about instance: %s' % combine_messages(resp)))
+    if (resp.result.scheduleStatusResult.tasks is None or
+        len(resp.result.scheduleStatusResult.tasks) == 0):
+      raise context.CommandError(EXIT_INVALID_PARAMETER,
+          "Job %s not found" % context.options.task_instance.jobkey)
     first_task = resp.result.scheduleStatusResult.tasks[0]
     remote_cmd = context.options.command or 'bash'
     command = DistributedCommandRunner.substitute(remote_cmd, first_task,
         api.cluster, executor_sandbox=context.options.executor_sandbox)
 
     ssh_command = ['ssh', '-t']
-    role = first_task.assignedTask.task.owner.role
-    slave_host = first_task.assignedTask.slaveHost
+    assigned = first_task.assignedTask
+    role = assigned.task.job.role if assigned.task.job else assigned.task.owner.role
+    slave_host = assigned.slaveHost
 
     for tunnel in context.options.tunnels:
       try:
         port, name = tunnel.split(':')
         port = int(port)
       except ValueError:
-        die('Could not parse tunnel: %s.  Must be of form PORT:NAME' % tunnel)
-      if name not in first_task.assignedTask.assignedPorts:
-        die('Task %s has no port named %s' % (first_task.assignedTask.taskId, name))
+        raise context.CommandError(EXIT_INVALID_PARAMETER,
+            'Could not parse tunnel: %s.  Must be of form PORT:NAME' % tunnel)
+      if name not in assigned.assignedPorts:
+        raise context.CommandError(EXIT_INVALID_PARAMETER,
+            'Task %s has no port named %s' % (assigned.taskId, name))
       ssh_command += [
-          '-L', '%d:%s:%d' % (port, slave_host, first_task.assignedTask.assignedPorts[name])]
+          '-L', '%d:%s:%d' % (port, slave_host, assigned.assignedPorts[name])]
 
     ssh_command += ['%s@%s' % (context.options.ssh_user or role, slave_host), command]
     return subprocess.call(ssh_command)

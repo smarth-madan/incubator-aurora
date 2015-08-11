@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,6 +14,7 @@
 package org.apache.aurora.scheduler.http;
 
 import java.util.Map;
+import java.util.Objects;
 
 import javax.inject.Inject;
 import javax.ws.rs.GET;
@@ -25,19 +24,18 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
 import com.google.common.base.Function;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Multimaps;
 
-import org.apache.aurora.gen.HostAttributes;
 import org.apache.aurora.gen.MaintenanceMode;
 import org.apache.aurora.scheduler.base.Query;
 import org.apache.aurora.scheduler.base.Tasks;
 import org.apache.aurora.scheduler.storage.Storage;
 import org.apache.aurora.scheduler.storage.Storage.StoreProvider;
 import org.apache.aurora.scheduler.storage.Storage.Work;
+import org.apache.aurora.scheduler.storage.entities.IHostAttributes;
 import org.apache.aurora.scheduler.storage.entities.IScheduledTask;
 
 import static org.apache.aurora.gen.MaintenanceMode.DRAINED;
@@ -53,18 +51,20 @@ public class Maintenance {
 
   @Inject
   Maintenance(Storage storage) {
-    this.storage = Preconditions.checkNotNull(storage);
+    this.storage = Objects.requireNonNull(storage);
   }
 
   @GET
   @Produces(MediaType.APPLICATION_JSON)
   public Response getHosts() {
-    return storage.weaklyConsistentRead(new Work.Quiet<Response>() {
+    return storage.read(new Work.Quiet<Response>() {
       @Override
       public Response apply(StoreProvider storeProvider) {
         Multimap<MaintenanceMode, String> hostsByMode =
             Multimaps.transformValues(
-              Multimaps.index(storeProvider.getAttributeStore().getHostAttributes(), GET_MODE),
+              Multimaps.index(
+                  storeProvider.getAttributeStore().getHostAttributes(),
+                  IHostAttributes::getMode),
               HOST_NAME);
 
         Map<MaintenanceMode, Object> hosts = Maps.newHashMap();
@@ -80,23 +80,15 @@ public class Maintenance {
     ImmutableSet.Builder<IScheduledTask> drainingTasks = ImmutableSet.builder();
     drainingTasks.addAll(provider.getTaskStore().fetchTasks(Query.slaveScoped(hosts).active()));
     return Multimaps.transformValues(
-        Multimaps.index(drainingTasks.build(), Tasks.SCHEDULED_TO_SLAVE_HOST),
-        Tasks.SCHEDULED_TO_ID);
+        Multimaps.index(drainingTasks.build(), Tasks::scheduledToSlaveHost),
+        Tasks::id);
   }
 
-  private static final Function<HostAttributes, String> HOST_NAME =
-      new Function<HostAttributes, String>() {
+  private static final Function<IHostAttributes, String> HOST_NAME =
+      new Function<IHostAttributes, String>() {
         @Override
-        public String apply(HostAttributes attributes) {
+        public String apply(IHostAttributes attributes) {
           return attributes.getHost();
-        }
-      };
-
-  private static final Function<HostAttributes, MaintenanceMode> GET_MODE =
-      new Function<HostAttributes, MaintenanceMode>() {
-        @Override
-        public MaintenanceMode apply(HostAttributes attrs) {
-          return attrs.getMode();
         }
       };
 }

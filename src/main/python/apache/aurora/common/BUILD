@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -13,65 +11,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
 import os
 
-python_library(
-  name = 'aurora_job_key',
-  sources = ['aurora_job_key.py'],
-  dependencies = [
-    pants('3rdparty/python:twitter.common.lang'),
-    pants('src/main/thrift/org/apache/aurora/gen:py-thrift'),
-  ]
-)
-
-python_library(
-  name = 'cluster',
-  sources = ['cluster.py'],
-  dependencies = [
-    pants('3rdparty/python:pystachio'),
-  ]
-)
-
-python_library(
-  name = 'clusters',
-  sources = ['clusters.py'],
-  dependencies = [
-    pants(':cluster'),
-    pants('3rdparty/python:pystachio'),
-    pants('3rdparty/python:twitter.common.collections'),
-  ]
-)
-
-python_library(
-  name = 'cluster_option',
-  sources = ['cluster_option.py'],
-  dependencies = [
-    pants('3rdparty/python:twitter.common.lang'),
-  ]
-)
-
-python_library(
-  name = 'http_signaler',
-  sources = ['http_signaler.py'],
-  dependencies = [
-    pants('3rdparty/python:twitter.common.lang'),
-    pants('3rdparty/python:twitter.common.log'),
-  ]
-)
 
 python_library(
   name = 'common',
+  sources = rglobs('*.py'),
   dependencies = [
-    pants(':aurora_job_key'),
-    pants(':cluster'),
-    pants(':cluster_option'),
-    pants(':clusters'),
-    pants(':http_signaler'),
-    pants('src/main/python/apache/aurora/common/auth'),
-
-    # covering dependency on gen.*
-    pants('src/main/thrift/org/apache/aurora/gen:py-thrift-packaged'),
+    '3rdparty/python:pex',
+    '3rdparty/python:pystachio',
+    '3rdparty/python:requests',
+    '3rdparty/python:thrift',
+    '3rdparty/python:twitter.common.collections',
+    '3rdparty/python:twitter.common.lang',
+    '3rdparty/python:twitter.common.log',
+    'api/src/main/thrift/org/apache/aurora/gen',
   ],
   provides = setup_py(
     name = 'apache.aurora.common',

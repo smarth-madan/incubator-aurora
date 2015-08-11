@@ -1,6 +1,4 @@
 #
-# Copyright 2014 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,21 +14,15 @@
 
 import math
 import time
-
 from collections import defaultdict, namedtuple
-from copy import deepcopy
 
-from apache.aurora.client.base import check_and_log_response
+from twitter.common import log
+
+from apache.aurora.client.base import DEFAULT_GROUPING, format_response, group_hosts
 from apache.aurora.common.aurora_job_key import AuroraJobKey
 
-from gen.apache.aurora.constants import LIVE_STATES
-from gen.apache.aurora.ttypes import (
-  Identity,
-  Response,
-  ResponseCode,
-  ScheduleStatus,
-  TaskQuery
-)
+from gen.apache.aurora.api.constants import LIVE_STATES
+from gen.apache.aurora.api.ttypes import ResponseCode, ScheduleStatus, TaskQuery
 
 
 def job_key_from_scheduled(task, cluster):
@@ -40,28 +32,25 @@ def job_key_from_scheduled(task, cluster):
   task -- ScheduledTask to get job key from.
   cluster -- Cluster the task belongs to.
   """
+  config = task.assignedTask.task
   return AuroraJobKey(
       cluster=cluster.name,
-      role=task.assignedTask.task.owner.role,
-      env=task.assignedTask.task.environment,
-      name=task.assignedTask.task.jobName
+      role=config.job.role if config.job else config.owner.role,
+      env=config.job.environment if config.job else config.environment,
+      name=config.job.name if config.job else config.jobName
   )
 
 
-def task_query(job_key=None, hosts=None, job_keys=None):
+def task_query(hosts=None, job_keys=None):
   """Creates TaskQuery optionally scoped by a job(s) or hosts.
 
   Arguments:
-  job_key -- AuroraJobKey to scope the query by.
   hosts -- list of hostnames to scope the query by.
   job_keys -- list of AuroraJobKeys to scope the query by.
   """
   return TaskQuery(
-      owner=Identity(role=job_key.role) if job_key else None,
-      environment=job_key.env if job_key else None,
-      jobName=job_key.name if job_key else None,
       slaveHosts=set(hosts) if hosts else None,
-      jobKeys=set(k.to_thrift() for k in job_keys) if job_keys else None,
+      jobKeys=[k.to_thrift() for k in job_keys] if job_keys else None,
       statuses=LIVE_STATES)
 
 
@@ -108,7 +97,6 @@ class JobUpTimeSlaVector(object):
     else:
       return duration - sorted(self._uptime_map.values())[index]
 
-
   def get_task_up_count(self, duration, total_tasks=None):
     """Returns the percentage of job tasks that stayed up longer than duration.
 
@@ -139,9 +127,17 @@ class JobUpTimeSlaVector(object):
     for task in self._tasks:
       for event in task.taskEvents:
         if event.status == ScheduleStatus.RUNNING:
-          instance_map[task.assignedTask.instanceId] = math.floor(self._now - event.timestamp / 1000)
+          instance_map[task.assignedTask.instanceId] = math.floor(
+              self._now - event.timestamp / 1000)
           break
     return instance_map
+
+
+JobUpTimeLimit = namedtuple('JobUpTimeLimit', ['job', 'percentage', 'duration_secs'])
+
+
+JobUpTimeDetails = namedtuple('JobUpTimeDetails',
+    ['job', 'predicted_percentage', 'safe', 'safe_in_secs'])
 
 
 class DomainUpTimeSlaVector(object):
@@ -150,18 +146,21 @@ class DomainUpTimeSlaVector(object):
       - host: Map of hostname -> job_key. Provides logical mapping between hosts and their jobs.
      Exposes an API for querying safe domain details.
   """
+  DEFAULT_MIN_INSTANCE_COUNT = 2
 
-  JobUpTimeLimit = namedtuple('JobUpTimeLimit', ['job', 'percentage', 'duration_secs'])
-  JobUpTimeDetails = namedtuple('JobUpTimeDetails',
-      ['job', 'predicted_percentage', 'safe', 'safe_in_secs'])
-
-  def __init__(self, cluster, tasks):
+  def __init__(self, cluster, tasks, min_instance_count=DEFAULT_MIN_INSTANCE_COUNT, hosts=None):
     self._cluster = cluster
     self._tasks = tasks
     self._now = time.time()
-    self._jobs, self._hosts = self._init_mappings()
+    self._tasks_by_job, self._jobs_by_host, self._hosts_by_job = self._init_mappings(
+        min_instance_count)
+    self._host_filter = hosts
 
-  def get_safe_hosts(self, percentage, duration, job_limits=None):
+  def get_safe_hosts(self,
+      percentage,
+      duration,
+      job_limits=None,
+      grouping_function=DEFAULT_GROUPING):
     """Returns hosts safe to restart with respect to their job SLA.
        Every host is analyzed separately without considering other job hosts.
 
@@ -170,29 +169,34 @@ class DomainUpTimeSlaVector(object):
        duration -- default task uptime duration in seconds. Used if job_limits mapping is not found.
        job_limits -- optional SLA override map. Key: job key. Value JobUpTimeLimit. If specified,
                      replaces default percentage/duration within the job context.
+       grouping_function -- grouping function to use to group hosts.
     """
-    safe_hosts = defaultdict(list)
-    for host, job_keys in self._hosts.items():
-      safe_limits = []
+    safe_groups = []
+    for hosts, job_keys in self._iter_groups(
+        self._jobs_by_host.keys(), grouping_function, self._host_filter):
+
+      safe_hosts = defaultdict(list)
       for job_key in job_keys:
+        job_hosts = hosts.intersection(self._hosts_by_job[job_key])
         job_duration = duration
         job_percentage = percentage
         if job_limits and job_key in job_limits:
           job_duration = job_limits[job_key].duration_secs
           job_percentage = job_limits[job_key].percentage
 
-        filtered_percentage, _, _ = self._simulate_host_down(job_key, host, job_duration)
-        safe_limits.append(self.JobUpTimeLimit(job_key, filtered_percentage, job_duration))
-
+        filtered_percentage, _, _ = self._simulate_hosts_down(job_key, job_hosts, job_duration)
         if filtered_percentage < job_percentage:
           break
 
+        for host in job_hosts:
+          safe_hosts[host].append(JobUpTimeLimit(job_key, filtered_percentage, job_duration))
+
       else:
-        safe_hosts[host] = safe_limits
+        safe_groups.append(safe_hosts)
 
-    return safe_hosts
+    return safe_groups
 
-  def probe_hosts(self, percentage, duration, hosts):
+  def probe_hosts(self, percentage, duration, grouping_function=DEFAULT_GROUPING):
     """Returns predicted job SLAs following the removal of provided hosts.
 
        For every given host creates a list of JobUpTimeDetails with predicted job SLA details
@@ -203,13 +207,15 @@ class DomainUpTimeSlaVector(object):
        Arguments:
        percentage -- task up count percentage.
        duration -- task uptime duration in seconds.
-       hosts -- list of hosts to probe for job SLA changes.
+       grouping_function -- grouping function to use to group hosts.
     """
-    probed_hosts = defaultdict(list)
-    for host in hosts:
-      for job_key in self._hosts.get(host, []):
-        filtered_percentage, total_count, filtered_vector = self._simulate_host_down(
-            job_key, host, duration)
+    probed_groups = []
+    for hosts, job_keys in self._iter_groups(self._host_filter or [], grouping_function):
+      probed_hosts = defaultdict(list)
+      for job_key in job_keys:
+        job_hosts = hosts.intersection(self._hosts_by_job[job_key])
+        filtered_percentage, total_count, filtered_vector = self._simulate_hosts_down(
+            job_key, job_hosts, duration)
 
         # Calculate wait time to SLA in case down host violates job's SLA.
         if filtered_percentage < percentage:
@@ -219,21 +225,40 @@ class DomainUpTimeSlaVector(object):
           safe = True
           wait_to_sla = 0
 
-        probed_hosts[host].append(
-            self.JobUpTimeDetails(job_key, filtered_percentage, safe, wait_to_sla))
+        for host in job_hosts:
+          probed_hosts[host].append(
+              JobUpTimeDetails(job_key, filtered_percentage, safe, wait_to_sla))
 
-    return probed_hosts
+      if probed_hosts:
+        probed_groups.append(probed_hosts)
 
-  def _simulate_host_down(self, job_key, host, duration):
-    unfiltered_tasks = self._jobs[job_key]
+    return probed_groups
+
+  def _iter_groups(self, hosts_to_group, grouping_function, host_filter=None):
+    groups = group_hosts(hosts_to_group, grouping_function)
+    for _, hosts in sorted(groups.items(), key=lambda v: v[0]):
+      job_keys = set()
+      for host in hosts:
+        if host_filter and host not in self._host_filter:
+          continue
+        job_keys = job_keys.union(self._jobs_by_host.get(host, set()))
+      yield hosts, job_keys
+
+  def _create_group_results(self, group, uptime_details):
+    result = defaultdict(list)
+    for host in group.keys():
+      result[host].append(uptime_details)
+
+  def _simulate_hosts_down(self, job_key, hosts, duration):
+    unfiltered_tasks = self._tasks_by_job[job_key]
 
     # Get total job task count to use in SLA calculation.
     total_count = len(unfiltered_tasks)
 
-    # Get a list of job tasks that would remain after the affected host goes down
+    # Get a list of job tasks that would remain after the affected hosts go down
     # and create an SLA vector with these tasks.
     filtered_tasks = [task for task in unfiltered_tasks
-                      if task.assignedTask.slaveHost != host]
+                      if task.assignedTask.slaveHost not in hosts]
     filtered_vector = JobUpTimeSlaVector(filtered_tasks, self._now)
 
     # Calculate the SLA that would be in effect should the host go down.
@@ -241,15 +266,25 @@ class DomainUpTimeSlaVector(object):
 
     return filtered_percentage, total_count, filtered_vector
 
-  def _init_mappings(self):
-    jobs = defaultdict(list)
-    hosts = defaultdict(list)
+  def _init_mappings(self, count):
+    tasks_by_job = defaultdict(list)
     for task in self._tasks:
-      job_key = job_key_from_scheduled(task, self._cluster)
-      jobs[job_key].append(task)
-      hosts[task.assignedTask.slaveHost].append(job_key)
+      if task.assignedTask.task.production:
+        tasks_by_job[job_key_from_scheduled(task, self._cluster)].append(task)
 
-    return jobs, hosts
+    # Filter jobs by the min instance count.
+    tasks_by_job = defaultdict(list, ((job, tasks) for job, tasks
+        in tasks_by_job.items() if len(tasks) >= count))
+
+    jobs_by_host = defaultdict(set)
+    hosts_by_job = defaultdict(set)
+    for job_key, tasks in tasks_by_job.items():
+      for task in tasks:
+        host = task.assignedTask.slaveHost
+        jobs_by_host[host].add(job_key)
+        hosts_by_job[job_key].add(host)
+
+    return tasks_by_job, jobs_by_host, hosts_by_job
 
 
 class Sla(object):
@@ -264,20 +299,30 @@ class Sla(object):
     Arguments:
     job_key -- job to create a task uptime vector for.
     """
-    return JobUpTimeSlaVector(self._get_tasks(task_query(job_key=job_key)))
+    return JobUpTimeSlaVector(self._get_tasks(task_query(job_keys=[job_key])))
 
-  def get_domain_uptime_vector(self, cluster, hosts=None):
+  def get_domain_uptime_vector(self, cluster, min_instance_count, hosts=None):
     """Returns a DomainUpTimeSlaVector object with all available job uptimes.
 
     Arguments:
     cluster -- Cluster to get vector for.
+    min_instance_count -- Minimum job instance count to consider for domain uptime calculations.
     hosts -- optional list of hostnames to query by.
     """
     tasks = self._get_tasks(task_query(hosts=hosts)) if hosts else None
     job_keys = set(job_key_from_scheduled(t, cluster) for t in tasks) if tasks else None
-    return DomainUpTimeSlaVector(cluster, self._get_tasks(task_query(job_keys=job_keys)))
+
+    # Avoid full cluster pull if job_keys are missing for any reason but the hosts are specified.
+    job_tasks = [] if hosts and not job_keys else self._get_tasks(task_query(job_keys=job_keys))
+    return DomainUpTimeSlaVector(
+        cluster,
+        job_tasks,
+        min_instance_count=min_instance_count,
+        hosts=hosts)
 
   def _get_tasks(self, task_query):
-    resp = self._scheduler.getTasksStatus(task_query)
-    check_and_log_response(resp)
+    resp = self._scheduler.getTasksWithoutConfigs(task_query)
+    log.info(format_response(resp))
+    if resp.responseCode != ResponseCode.OK:
+      return []
     return resp.result.scheduleStatusResult.tasks

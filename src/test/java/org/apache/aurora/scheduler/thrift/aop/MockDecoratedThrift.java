@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -21,9 +19,9 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 import javax.inject.Inject;
+import javax.inject.Qualifier;
 
 import com.google.inject.Binder;
-import com.google.inject.BindingAnnotation;
 
 import org.apache.aurora.gen.AuroraAdmin;
 import org.apache.aurora.scheduler.thrift.auth.DecoratedThrift;
@@ -35,20 +33,22 @@ import org.apache.aurora.scheduler.thrift.auth.DecoratedThrift;
  * https://code.google.com/p/google-guice/wiki/AOP#Limitations
  */
 @DecoratedThrift
-class MockDecoratedThrift extends ForwardingThrift {
+public class MockDecoratedThrift extends ForwardingThrift {
 
   @Retention(RetentionPolicy.RUNTIME)
   @Target({ElementType.PARAMETER, ElementType.METHOD})
-  @BindingAnnotation
+  @Qualifier
   private @interface MockThrift { }
 
   @Inject
-  MockDecoratedThrift(@MockThrift AuroraAdmin.Iface delegate) {
+  MockDecoratedThrift(@MockThrift AnnotatedAuroraAdmin delegate) {
     super(delegate);
   }
 
-  static void bindForwardedMock(Binder binder, AuroraAdmin.Iface mockThrift) {
-    binder.bind(AuroraAdmin.Iface.class).annotatedWith(MockThrift.class).toInstance(mockThrift);
+  public static void bindForwardedMock(Binder binder, AnnotatedAuroraAdmin mockThrift) {
+    binder.bind(AnnotatedAuroraAdmin.class).annotatedWith(MockThrift.class).toInstance(mockThrift);
+
+    binder.bind(AnnotatedAuroraAdmin.class).to(MockDecoratedThrift.class);
     binder.bind(AuroraAdmin.Iface.class).to(MockDecoratedThrift.class);
   }
 }

@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,13 +14,15 @@
 package org.apache.aurora.scheduler.state;
 
 import java.util.Date;
+import java.util.Optional;
 
 import javax.inject.Inject;
 
-import com.google.common.base.Optional;
+import com.google.common.annotations.VisibleForTesting;
 import com.twitter.common.util.Clock;
 
 import org.apache.aurora.gen.Lock;
+import org.apache.aurora.gen.LockKey._Fields;
 import org.apache.aurora.scheduler.base.JobKeys;
 import org.apache.aurora.scheduler.storage.LockStore;
 import org.apache.aurora.scheduler.storage.Storage;
@@ -33,22 +33,23 @@ import org.apache.aurora.scheduler.storage.Storage.Work;
 import org.apache.aurora.scheduler.storage.entities.ILock;
 import org.apache.aurora.scheduler.storage.entities.ILockKey;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
 
 /**
  * Implements lock-related primitives required to provide mutual exclusion guarantees
  * to the critical Scheduler state-mutating operations.
  */
-class LockManagerImpl implements LockManager {
+@VisibleForTesting
+public class LockManagerImpl implements LockManager {
   private final Storage storage;
   private final Clock clock;
   private final UUIDGenerator tokenGenerator;
 
   @Inject
   LockManagerImpl(Storage storage, Clock clock, UUIDGenerator tokenGenerator) {
-    this.storage = checkNotNull(storage);
-    this.clock = checkNotNull(clock);
-    this.tokenGenerator = checkNotNull(tokenGenerator);
+    this.storage = requireNonNull(storage);
+    this.clock = requireNonNull(clock);
+    this.tokenGenerator = requireNonNull(tokenGenerator);
   }
 
   @Override
@@ -92,10 +93,10 @@ class LockManagerImpl implements LockManager {
   }
 
   @Override
-  public synchronized void validateIfLocked(final ILockKey context, Optional<ILock> heldLock)
+  public void validateIfLocked(final ILockKey context, Optional<ILock> heldLock)
       throws LockException {
 
-    Optional<ILock> stored = storage.consistentRead(new Work.Quiet<Optional<ILock>>() {
+    Optional<ILock> stored = storage.read(new Work.Quiet<Optional<ILock>>() {
       @Override
       public Optional<ILock> apply(StoreProvider storeProvider) {
         return storeProvider.getLockStore().fetchLock(context);
@@ -122,12 +123,19 @@ class LockManagerImpl implements LockManager {
     }
   }
 
+  @Override
+  public Iterable<ILock> getLocks() {
+    return storage.read(new Work.Quiet<Iterable<ILock>>() {
+      @Override
+      public Iterable<ILock> apply(StoreProvider storeProvider) {
+        return storeProvider.getLockStore().fetchLocks();
+      }
+    });
+  }
+
   private static String formatLockKey(ILockKey lockKey) {
-    switch (lockKey.getSetField()) {
-      case JOB:
-        return JobKeys.toPath(lockKey.getJob());
-      default:
-        return "Unknown lock key type: " + lockKey.getSetField();
-    }
+    return lockKey.getSetField() == _Fields.JOB
+        ? JobKeys.canonicalString(lockKey.getJob())
+        : "Unknown lock key type: " + lockKey.getSetField();
   }
 }

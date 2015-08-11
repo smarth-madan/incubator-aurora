@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,13 +12,15 @@
 # limitations under the License.
 #
 
+import math
 import operator
-
 from copy import deepcopy
 
-from gen.apache.aurora.ttypes import ResourceAggregate, Response, ResponseCode
-
 from twitter.common import log
+
+from apache.aurora.client.base import combine_messages
+
+from gen.apache.aurora.api.ttypes import ResourceAggregate, Response, ResponseCode, ResponseDetail
 
 
 class CapacityRequest(object):
@@ -57,6 +57,16 @@ class CapacityRequest(object):
   def valid(self):
     return self._quota.numCpus >= 0.0 and self._quota.ramMb >= 0 and self._quota.diskMb >= 0
 
+  def invert_or_reset(self):
+    """Inverts negative resource and resets positive resource as zero."""
+    def invert_or_reset(val):
+      return math.fabs(val) if val < 0 else 0
+
+    return CapacityRequest(ResourceAggregate(
+        numCpus=invert_or_reset(self._quota.numCpus),
+        ramMb=invert_or_reset(self._quota.ramMb),
+        diskMb=invert_or_reset(self._quota.diskMb)))
+
   def quota(self):
     return deepcopy(self._quota)
 
@@ -73,18 +83,21 @@ class QuotaCheck(object):
     Arguments:
     job_key -- job key.
     production -- production flag.
-    released -- CapacityRequest to be released (in case of job update).
-    acquired -- CapacityRequest to be acquired.
+    released -- production CapacityRequest to be released (in case of job update).
+    acquired -- production CapacityRequest to be acquired.
 
     Returns: ResponseCode.OK if check is successful.
     """
-    resp_ok = Response(responseCode=ResponseCode.OK, message='Quota check successful.')
+    # TODO(wfarner): Avoid synthesizing scheduler responses.
+    resp_ok = Response(
+        responseCode=ResponseCode.OK,
+        details=[ResponseDetail(message='Quota check successful.')])
     if not production:
       return resp_ok
 
     resp = self._scheduler.getQuota(job_key.role)
     if resp.responseCode != ResponseCode.OK:
-      log.error('Failed to get quota from scheduler: %s' % resp.message)
+      log.error('Failed to get quota from scheduler: %s' % combine_messages(resp))
       return resp
 
     allocated = CapacityRequest(resp.result.getQuotaResult.quota)
@@ -97,7 +110,12 @@ class QuotaCheck(object):
       print_quota(allocated.quota(), 'Total allocated quota', job_key.role)
       print_quota(consumed.quota(), 'Consumed quota', job_key.role)
       print_quota(requested.quota(), 'Requested', job_key.name)
-      return Response(responseCode=ResponseCode.INVALID_REQUEST, message='Failed quota check.')
+      print_quota(effective.invert_or_reset().quota(), 'Additional quota required', job_key.role)
+
+      # TODO(wfarner): Avoid synthesizing scheduler responses.
+      return Response(
+          responseCode=ResponseCode.INVALID_REQUEST,
+          details=[ResponseDetail(message='Failed quota check.')])
 
     return resp_ok
 
@@ -110,4 +128,3 @@ def print_quota(quota, msg, subj):
   ]
   log.info('%s for %s:\n\t%s' %
            (msg, subj, '\n\t'.join(['%s\t%s' % (k, v) for (k, v) in quota_fields])))
-

@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -17,11 +15,15 @@ package org.apache.aurora.scheduler.base;
 
 import java.util.Set;
 
+import com.google.common.collect.DiscreteDomain;
+import com.google.common.collect.ImmutableRangeSet;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
 import com.google.common.collect.Range;
 import com.google.common.collect.Sets;
+
+import org.apache.aurora.scheduler.storage.entities.IRange;
 
 /**
  * Utility class for working with numbers.
@@ -37,6 +39,8 @@ public final class Numbers {
    * input integers.
    * <p>
    * The resulting ranges will be in ascending order.
+   * <p>
+   * TODO(wfarner): Change this to return a canonicalized RangeSet.
    *
    * @param values Values to transform to ranges.
    * @return Closed ranges with identical members to the input set.
@@ -53,7 +57,7 @@ public final class Numbers {
       int start = iterator.next();
       int end = start;
       // Increment the end until the range is non-contiguous.
-      while (iterator.hasNext() && (iterator.peek() == (end + 1))) {
+      while (iterator.hasNext() && iterator.peek() == end + 1) {
         end++;
         iterator.next();
       }
@@ -62,5 +66,31 @@ public final class Numbers {
     }
 
     return builder.build();
+  }
+
+  /**
+   * Convert between range types.
+   *
+   * @param range Range to convert.
+   * @return A closed range from the first to last of {@code range}.
+   */
+  public static Range<Integer> toRange(IRange range) {
+    return Range.closed(range.getFirst(), range.getLast());
+  }
+
+  /**
+   * Performs {@link #toRange(IRange)} for a collection of ranges, and convert the result to a set
+   * of integers.
+   *
+   * @param ranges Ranges to convert.
+   * @return A set representing {@code ranges}.
+   */
+  public static Set<Integer> rangesToInstanceIds(Iterable<IRange> ranges) {
+    ImmutableRangeSet.Builder<Integer> instanceIds = ImmutableRangeSet.builder();
+    for (IRange range : ranges) {
+      instanceIds.add(toRange(range));
+    }
+
+    return instanceIds.build().asSet(DiscreteDomain.integers());
   }
 }

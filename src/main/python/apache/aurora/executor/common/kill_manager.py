@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,13 +12,16 @@
 # limitations under the License.
 #
 
-from .status_checker import ExitState, StatusChecker, StatusResult
+from mesos.interface.mesos_pb2 import TaskState
+
+from .status_checker import StatusChecker, StatusResult
 
 
 class KillManager(StatusChecker):
   """
     A health interface that provides a kill-switch for a task monitored by the status manager.
   """
+
   def __init__(self):
     self._killed = False
     self._reason = None
@@ -28,7 +29,7 @@ class KillManager(StatusChecker):
   @property
   def status(self):
     if self._killed:
-      return StatusResult(self._reason, ExitState.KILLED)
+      return StatusResult(self._reason, TaskState.Value('TASK_KILLED'))
 
   def name(self):
     return 'kill_manager'

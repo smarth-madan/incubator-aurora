@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,6 +13,8 @@
  */
 package org.apache.aurora.scheduler.http;
 
+import java.util.Objects;
+
 import javax.inject.Inject;
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
@@ -22,9 +22,7 @@ import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
-import com.google.common.base.Preconditions;
-
-import org.apache.aurora.scheduler.async.TaskGroups;
+import org.apache.aurora.scheduler.scheduling.TaskGroups;
 
 /**
  * Servlet that exposes detailed information about tasks that are pending.
@@ -36,7 +34,7 @@ public class PendingTasks {
 
   @Inject
   PendingTasks(TaskGroups taskGroups) {
-    this.taskGroups = Preconditions.checkNotNull(taskGroups);
+    this.taskGroups = Objects.requireNonNull(taskGroups);
   }
 
   /**

@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -22,8 +20,9 @@ import java.util.logging.Logger;
 
 import javax.inject.Inject;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
-import com.google.common.base.Joiner;
+import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 
@@ -34,8 +33,11 @@ import org.apache.aurora.gen.ExecutorConfig;
 import org.apache.aurora.gen.JobConfiguration;
 import org.apache.aurora.gen.ResponseCode;
 import org.apache.aurora.gen.SessionKey;
+import org.apache.aurora.scheduler.storage.Storage;
+import org.apache.aurora.scheduler.thrift.Responses;
+import org.apache.shiro.ShiroException;
 
-import static org.apache.aurora.scheduler.thrift.aop.Interceptors.properlyTypedResponse;
+import static java.util.Objects.requireNonNull;
 
 /**
  * A method interceptor that logs all invocations as well as any unchecked exceptions thrown from
@@ -45,11 +47,20 @@ class LoggingInterceptor implements MethodInterceptor {
 
   private static final Logger LOG = Logger.getLogger(LoggingInterceptor.class.getName());
 
-  @Inject private CapabilityValidator validator;
+  @Inject
+  private CapabilityValidator validator;
 
-  // TODO(wfarner): Scrub updateToken when it is identifiable by type.
+  LoggingInterceptor() {
+    // Guice constructor.
+  }
+
+  @VisibleForTesting
+  LoggingInterceptor(CapabilityValidator validator) {
+    this.validator = requireNonNull(validator);
+  }
+
   private final Map<Class<?>, Function<Object, String>> printFunctions =
-      ImmutableMap.<Class<?>, Function<Object, String>>of(
+      ImmutableMap.of(
           JobConfiguration.class,
           new Function<Object, String>() {
             @Override
@@ -84,13 +95,19 @@ class LoggingInterceptor implements MethodInterceptor {
       }
     }
     String methodName = invocation.getMethod().getName();
-    String message = String.format("%s(%s)", methodName, Joiner.on(", ").join(argStrings));
+    String message = String.format("%s(%s)", methodName, String.join(", ", argStrings));
     LOG.info(message);
     try {
       return invocation.proceed();
+    } catch (Storage.TransientStorageException e) {
+      LOG.log(Level.WARNING, "Uncaught transient exception while handling " + message, e);
+      return Responses.addMessage(Responses.empty(), ResponseCode.ERROR_TRANSIENT, e);
     } catch (RuntimeException e) {
+      // We need shiro's exceptions to bubble up to the Shiro servlet filter so we intentionally
+      // do not swallow them here.
+      Throwables.propagateIfInstanceOf(e, ShiroException.class);
       LOG.log(Level.WARNING, "Uncaught exception while handling " + message, e);
-      return properlyTypedResponse(invocation.getMethod(), ResponseCode.ERROR, e.getMessage());
+      return Responses.addMessage(Responses.empty(), ResponseCode.ERROR, e);
     }
   }
 }

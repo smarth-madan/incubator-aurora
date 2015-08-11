@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -27,5 +25,5 @@ public interface CronPredictor {
    * @param schedule Cron schedule to predict the next time for.
    * @return A prediction for the next time a cron will run.
    */
-  Date predictNextRun(String schedule);
+  Date predictNextRun(CrontabEntry schedule);
 }

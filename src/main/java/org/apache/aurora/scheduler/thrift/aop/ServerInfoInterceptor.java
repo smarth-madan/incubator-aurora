@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -22,8 +20,6 @@ import org.aopalliance.intercept.MethodInvocation;
 import org.apache.aurora.gen.Response;
 import org.apache.aurora.scheduler.storage.entities.IServerInfo;
 
-import static org.apache.aurora.gen.apiConstants.CURRENT_API_VERSION;
-
 class ServerInfoInterceptor implements MethodInterceptor {
 
   @Inject
@@ -32,7 +28,6 @@ class ServerInfoInterceptor implements MethodInterceptor {
   @Override
   public Object invoke(MethodInvocation invocation) throws Throwable {
     Response resp = (Response) invocation.proceed();
-    resp.setDEPRECATEDversion(CURRENT_API_VERSION);
     resp.setServerInfo(serverInfo.newBuilder());
     return resp;
   }

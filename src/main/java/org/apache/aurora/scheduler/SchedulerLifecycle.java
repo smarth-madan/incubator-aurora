@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,7 +13,13 @@
  */
 package org.apache.aurora.scheduler;
 
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
@@ -23,11 +27,14 @@ import java.util.logging.Logger;
 
 import javax.annotation.Nullable;
 import javax.inject.Inject;
+import javax.inject.Qualifier;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
+import com.google.common.base.Supplier;
+import com.google.common.base.Throwables;
 import com.google.common.eventbus.Subscribe;
 import com.google.common.util.concurrent.Atomics;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
@@ -35,33 +42,26 @@ import com.twitter.common.application.Lifecycle;
 import com.twitter.common.application.ShutdownRegistry;
 import com.twitter.common.base.Closure;
 import com.twitter.common.base.Closures;
-import com.twitter.common.base.Command;
+import com.twitter.common.base.ExceptionalCommand;
 import com.twitter.common.quantity.Amount;
 import com.twitter.common.quantity.Time;
-import com.twitter.common.stats.StatImpl;
-import com.twitter.common.stats.Stats;
-import com.twitter.common.util.Clock;
+import com.twitter.common.stats.StatsProvider;
 import com.twitter.common.util.StateMachine;
 import com.twitter.common.util.StateMachine.Transition;
 import com.twitter.common.zookeeper.Group.JoinException;
 import com.twitter.common.zookeeper.ServerSet;
 import com.twitter.common.zookeeper.SingletonService.LeaderControl;
 
-import org.apache.aurora.scheduler.Driver.SettableDriver;
+import org.apache.aurora.GuavaUtils.ServiceManagerIface;
 import org.apache.aurora.scheduler.events.EventSink;
 import org.apache.aurora.scheduler.events.PubsubEvent.DriverRegistered;
 import org.apache.aurora.scheduler.events.PubsubEvent.EventSubscriber;
-import org.apache.aurora.scheduler.events.PubsubEvent.SchedulerActive;
-import org.apache.aurora.scheduler.storage.Storage.MutableStoreProvider;
-import org.apache.aurora.scheduler.storage.Storage.MutateWork;
+import org.apache.aurora.scheduler.mesos.Driver;
 import org.apache.aurora.scheduler.storage.Storage.NonVolatileStorage;
-import org.apache.aurora.scheduler.storage.Storage.StoreProvider;
-import org.apache.aurora.scheduler.storage.Storage.Work;
 import org.apache.aurora.scheduler.storage.StorageBackfill;
-import org.apache.mesos.Protos;
-import org.apache.mesos.SchedulerDriver;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
+
 import static com.twitter.common.zookeeper.SingletonService.LeadershipListener;
 
 /**
@@ -93,7 +93,8 @@ public class SchedulerLifecycle implements EventSubscriber {
 
   private static final Logger LOG = Logger.getLogger(SchedulerLifecycle.class.getName());
 
-  private enum State {
+  @VisibleForTesting
+  enum State {
     IDLE,
     PREPARING_STORAGE,
     STORAGE_PREPARED,
@@ -116,45 +117,36 @@ public class SchedulerLifecycle implements EventSubscriber {
   private final AtomicReference<LeaderControl> leaderControl = Atomics.newReference();
   private final StateMachine<State> stateMachine;
 
-  // The local driver reference, distinct from the global SettableDriver.
-  // This is used to perform actions with the driver (i.e. invoke start(), join()),
-  // which no other code should do.  It also permits us to save the reference until we are ready to
-  // make the driver ready by invoking SettableDriver.initialize().
-  private final AtomicReference<SchedulerDriver> driverRef = Atomics.newReference();
-
   @Inject
   SchedulerLifecycle(
-      DriverFactory driverFactory,
       NonVolatileStorage storage,
       Lifecycle lifecycle,
-      SettableDriver driver,
+      Driver driver,
       LeadingOptions leadingOptions,
       ScheduledExecutorService executorService,
-      Clock clock,
       EventSink eventSink,
-      ShutdownRegistry shutdownRegistry) {
+      ShutdownRegistry shutdownRegistry,
+      StatsProvider statsProvider,
+      @SchedulerActive ServiceManagerIface schedulerActiveServiceManager) {
 
     this(
-        driverFactory,
         storage,
         lifecycle,
         driver,
         new DefaultDelayedActions(leadingOptions, executorService),
-        clock,
         eventSink,
-        shutdownRegistry);
+        shutdownRegistry,
+        statsProvider,
+        schedulerActiveServiceManager);
   }
 
   private static final class DefaultDelayedActions implements DelayedActions {
     private final LeadingOptions leadingOptions;
     private final ScheduledExecutorService executorService;
 
-    private DefaultDelayedActions(
-        LeadingOptions leadingOptions,
-        ScheduledExecutorService executorService) {
-
-      this.leadingOptions = checkNotNull(leadingOptions);
-      this.executorService = checkNotNull(executorService);
+    DefaultDelayedActions(LeadingOptions leadingOptions, ScheduledExecutorService executorService) {
+      this.leadingOptions = requireNonNull(leadingOptions);
+      this.executorService = requireNonNull(executorService);
     }
 
     @Override
@@ -187,52 +179,59 @@ public class SchedulerLifecycle implements EventSubscriber {
           leadingOptions.registrationDelayLimit.getValue(),
           leadingOptions.registrationDelayLimit.getUnit().getTimeUnit());
     }
+  }
 
-    @Override
-    public void onRegistered(Runnable runnable) {
-      executorService.submit(runnable);
-    }
+  @VisibleForTesting
+  static final String REGISTERED_GAUGE = "framework_registered";
+
+  @VisibleForTesting
+  static String stateGaugeName(State state) {
+    return "scheduler_lifecycle_" + state;
   }
 
   @VisibleForTesting
   SchedulerLifecycle(
-      final DriverFactory driverFactory,
       final NonVolatileStorage storage,
       final Lifecycle lifecycle,
-      final SettableDriver driver,
+      final Driver driver,
       final DelayedActions delayedActions,
-      final Clock clock,
       final EventSink eventSink,
-      final ShutdownRegistry shutdownRegistry) {
+      final ShutdownRegistry shutdownRegistry,
+      StatsProvider statsProvider,
+      final ServiceManagerIface schedulerActiveServiceManager) {
 
-    checkNotNull(driverFactory);
-    checkNotNull(storage);
-    checkNotNull(lifecycle);
-    checkNotNull(driver);
-    checkNotNull(delayedActions);
-    checkNotNull(clock);
-    checkNotNull(eventSink);
-    checkNotNull(shutdownRegistry);
+    requireNonNull(storage);
+    requireNonNull(lifecycle);
+    requireNonNull(driver);
+    requireNonNull(delayedActions);
+    requireNonNull(eventSink);
+    requireNonNull(shutdownRegistry);
 
-    Stats.export(new StatImpl<Integer>("framework_registered") {
-      @Override
-      public Integer read() {
-        return registrationAcked.get() ? 1 : 0;
-      }
-    });
+    statsProvider.makeGauge(
+        REGISTERED_GAUGE,
+        new Supplier<Integer>() {
+          @Override
+          public Integer get() {
+            return registrationAcked.get() ? 1 : 0;
+          }
+        });
     for (final State state : State.values()) {
-      Stats.export(new StatImpl<Integer>("scheduler_lifecycle_" + state) {
-        @Override
-        public Integer read() {
-          return (state == stateMachine.getState()) ? 1 : 0;
-        }
-      });
+      statsProvider.makeGauge(
+          stateGaugeName(state),
+          new Supplier<Integer>() {
+            @Override
+            public Integer get() {
+              return (state == stateMachine.getState()) ? 1 : 0;
+            }
+          });
     }
 
-    shutdownRegistry.addAction(new Command() {
+    shutdownRegistry.addAction(new ExceptionalCommand<TimeoutException>() {
       @Override
-      public void execute() {
+      public void execute() throws TimeoutException {
         stateMachine.transition(State.DEAD);
+        schedulerActiveServiceManager.stopAsync();
+        schedulerActiveServiceManager.awaitStopped(5L, TimeUnit.SECONDS);
       }
     });
 
@@ -248,24 +247,9 @@ public class SchedulerLifecycle implements EventSubscriber {
       @Override
       public void execute(Transition<State> transition) {
         LOG.info("Elected as leading scheduler!");
-        storage.start(new MutateWork.NoResult.Quiet() {
-          @Override
-          protected void execute(MutableStoreProvider storeProvider) {
-            StorageBackfill.backfill(storeProvider, clock);
-          }
-        });
+        storage.start(StorageBackfill::backfill);
 
-        @Nullable final String frameworkId = storage.consistentRead(
-            new Work.Quiet<String>() {
-              @Override
-              public String apply(StoreProvider storeProvider) {
-                return storeProvider.getSchedulerStore().fetchFrameworkId();
-              }
-            });
-
-        // Save the prepared driver locally, but don't expose it until the registered callback is
-        // received.
-        driverRef.set(driverFactory.apply(frameworkId));
+        driver.startAsync().awaitRunning();
 
         delayedActions.onRegistrationTimeout(
             new Runnable() {
@@ -287,9 +271,6 @@ public class SchedulerLifecycle implements EventSubscriber {
                 stateMachine.transition(State.DEAD);
               }
             });
-
-        Protos.Status status = driverRef.get().start();
-        LOG.info("Driver started with code " + status);
       }
     };
 
@@ -297,57 +278,23 @@ public class SchedulerLifecycle implements EventSubscriber {
       @Override
       public void execute(Transition<State> transition) {
         registrationAcked.set(true);
-        driver.initialize(driverRef.get());
         delayedActions.blockingDriverJoin(new Runnable() {
           @Override
           public void run() {
-            // Blocks until driver exits.
-            driverRef.get().join();
+            driver.blockUntilStopped();
+            LOG.info("Driver exited, terminating lifecycle.");
             stateMachine.transition(State.DEAD);
           }
         });
 
-        // This action sequence must be deferred due to a subtle detail of how guava's EventBus
-        // works. EventBus event handlers are guaranteed to not be reentrant, meaning that posting
-        // an event from an event handler will not dispatch in the same sequence as the calls to
-        // post().
-        // In short, this is to enforce a happens-before relationship between delivering
-        // SchedulerActive and advertising leadership. Without deferring, you end up with a call
-        // sequence like this:
-        //
-        // - Enter DriverRegistered handler
-        //   - Post SchedulerActive event
-        //   - Announce leadership
-        // - Exit DriverRegistered handler
-        // - Dispatch SchedulerActive to subscribers
-        //
-        // With deferring, we get this instead:
-        //
-        // - Enter DriverRegistered handler
-        // - Exit DriverRegistered handler
-        // (executor service dispatch delay)
-        // - Post SchedulerActive Event
-        //   - Dispatch SchedulerActive to subscribers
-        // - Announce leadership
-        //
-        // The latter is preferable since it makes it easier to reason about the state of an
-        // announced scheduler.
-        delayedActions.onRegistered(new Runnable() {
-          @Override
-          public void run() {
-            eventSink.post(new SchedulerActive());
-            try {
-              leaderControl.get().advertise();
-            } catch (JoinException e) {
-              LOG.log(Level.SEVERE, "Failed to advertise leader, shutting down.", e);
-              stateMachine.transition(State.DEAD);
-            } catch (InterruptedException e) {
-              LOG.log(Level.SEVERE, "Interrupted while advertising leader, shutting down.", e);
-              stateMachine.transition(State.DEAD);
-              Thread.currentThread().interrupt();
-            }
-          }
-        });
+        // TODO(ksweeney): Extract leader advertisement to its own service.
+        schedulerActiveServiceManager.startAsync().awaitHealthy();
+        try {
+          leaderControl.get().advertise();
+        } catch (JoinException | InterruptedException e) {
+          LOG.log(Level.SEVERE, "Failed to advertise leader, shutting down.");
+          throw Throwables.propagate(e);
+        }
       }
     };
 
@@ -376,7 +323,7 @@ public class SchedulerLifecycle implements EventSubscriber {
 
           // TODO(wfarner): Re-evaluate tear-down ordering here.  Should the top-level shutdown
           // be invoked first, or the underlying critical components?
-          driver.stop();
+          driver.stopAsync().awaitTerminated();
           storage.stop();
         } finally {
           lifecycle.shutdown();
@@ -424,6 +371,7 @@ public class SchedulerLifecycle implements EventSubscriber {
         try {
           closure.execute(transition);
         } catch (RuntimeException e) {
+          LOG.log(Level.SEVERE, "Caught unchecked exception: " + e, e);
           stateMachine.transition(State.DEAD);
           throw e;
         }
@@ -495,8 +443,8 @@ public class SchedulerLifecycle implements EventSubscriber {
           leadingTimeLimit.getValue() >= 0,
           "Leading time limit must be positive.");
 
-      this.registrationDelayLimit = checkNotNull(registrationDelayLimit);
-      this.leadingTimeLimit = checkNotNull(leadingTimeLimit);
+      this.registrationDelayLimit = requireNonNull(registrationDelayLimit);
+      this.leadingTimeLimit = requireNonNull(leadingTimeLimit);
     }
   }
 
@@ -507,7 +455,14 @@ public class SchedulerLifecycle implements EventSubscriber {
     void onAutoFailover(Runnable runnable);
 
     void onRegistrationTimeout(Runnable runnable);
-
-    void onRegistered(Runnable runnable);
   }
+
+  /**
+   * Qualifier for services that will be run after the scheduler storage is available
+   * but before leadership is announced in ZooKeeper.
+   */
+  @Qualifier
+  @Retention(RetentionPolicy.RUNTIME)
+  @Target({ElementType.FIELD, ElementType.METHOD, ElementType.PARAMETER})
+  public static @interface SchedulerActive { }
 }

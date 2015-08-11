@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -45,7 +43,7 @@ class Cluster(dict):
     # Will use the default if none is provided on Cluster.
     cluster.with_trait(ResolverTrait).scheduler_zk_path
   """
-  Trait = Struct
+  Trait = Struct  # noqa
 
   def __init__(self, **kwargs):
     self._traits = ()

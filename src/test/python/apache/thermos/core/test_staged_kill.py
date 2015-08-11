@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -20,27 +18,18 @@ import sys
 import threading
 import time
 
+import pytest
 from twitter.common.process import ProcessProviderFactory
 from twitter.common.quantity import Amount, Time
-from apache.thermos.config.schema import (
-  Task,
-  Resources,
-  Process)
+
+from apache.thermos.config.schema import Process, Task
 from apache.thermos.core.runner import TaskRunner
 from apache.thermos.monitoring.monitor import TaskMonitor
 from apache.thermos.testing.runner import Runner
 
-from gen.apache.thermos.ttypes import (
-  TaskState,
-  ProcessState
-)
+from gen.apache.thermos.ttypes import ProcessState, TaskState
 
-import pytest
-
-sleepy_process = Process(
-  name = "sleepy",
-  cmdline = "sleep 3",
-  min_duration = 1)
+sleepy_process = Process(name="sleepy", cmdline="sleep 3", min_duration=1)
 
 ignore_script = [
   "import time, signal",
@@ -90,7 +79,7 @@ class RunnerBase(object):
 class ProcessPidTestCase(object):
   def test_process_kill(self):
     runner = self.start_runner()
-    tm = TaskMonitor(runner.pathspec, runner.task_id)
+    tm = TaskMonitor(runner.tempdir, runner.task_id)
     self.wait_until_running(tm)
 
     process_state, run_number = tm.get_active_processes()[0]
@@ -115,12 +104,12 @@ class ProcessPidTestCase(object):
 class TestRunnerKill(RunnerBase, ProcessPidTestCase):
   @classmethod
   def task(cls):
-    task = Task(name = "task", processes = [sleepy_process(name="process")])
+    task = Task(name="task", processes=[sleepy_process(name="process")])
     return task.interpolate()[0]
 
   def test_coordinator_kill(self):
     runner = self.start_runner()
-    tm = TaskMonitor(runner.pathspec, runner.task_id)
+    tm = TaskMonitor(runner.tempdir, runner.task_id)
     self.wait_until_running(tm)
 
     process_state, run_number = tm.get_active_processes()[0]
@@ -144,14 +133,14 @@ class TestRunnerKill(RunnerBase, ProcessPidTestCase):
 class TestRunnerKillProcessTrappingSIGTERM(RunnerBase):
   @classmethod
   def task(cls):
-    task = Task(name = "task",
-                finalization_wait = 3,
-                processes = [ignorant_process(name="ignorant_process")])
+    task = Task(name="task",
+                finalization_wait=3,
+                processes=[ignorant_process(name="ignorant_process")])
     return task.interpolate()[0]
 
   def test_coordinator_kill(self):
     runner = self.start_runner()
-    tm = TaskMonitor(runner.pathspec, runner.task_id)
+    tm = TaskMonitor(runner.tempdir, runner.task_id)
     self.wait_until_running(tm)
     process_state, run_number = tm.get_active_processes()[0]
     assert process_state.process == 'ignorant_process'
@@ -190,7 +179,7 @@ class TestRunnerKillProcessTrappingSIGTERM(RunnerBase):
 
   def test_coordinator_dead_kill(self):
     runner = self.start_runner()
-    tm = TaskMonitor(runner.pathspec, runner.task_id)
+    tm = TaskMonitor(runner.tempdir, runner.task_id)
     self.wait_until_running(tm)
     process_state, run_number = tm.get_active_processes()[0]
     assert process_state.process == 'ignorant_process'
@@ -208,11 +197,10 @@ class TestRunnerKillProcessTrappingSIGTERM(RunnerBase):
     assert len(state.processes['ignorant_process']) == 1
     assert state.processes['ignorant_process'][0].state == ProcessState.LOST
 
-  # TODO(wickman) MESOS-4326
-  @pytest.mark.skipif('True')
+  @pytest.mark.skipif('True', reason='Flaky test (AURORA-161)')
   def test_preemption_wait(self):
     runner = self.start_runner()
-    tm = TaskMonitor(runner.pathspec, runner.task_id)
+    tm = TaskMonitor(runner.tempdir, runner.task_id)
     self.wait_until_running(tm)
     process_state, run_number = tm.get_active_processes()[0]
     assert process_state.process == 'ignorant_process'
@@ -230,7 +218,6 @@ class TestRunnerKillProcessTrappingSIGTERM(RunnerBase):
 
     assert preempter.state.statuses[-1].state == TaskState.KILLED
     assert preempter.state.processes['ignorant_process'][-1].state == ProcessState.KILLED
-
 
 
 SIMPLEFORK_SCRIPT = """
@@ -252,17 +239,18 @@ else:
   while not os.path.exists('exit.txt'):
     time.sleep(0.1)
 EOF
-""" % { 'INTERPRETER': sys.executable }
+""" % {'INTERPRETER': sys.executable}
+
 
 class TestRunnerKillProcessGroup(RunnerBase):
   @classmethod
   def task(cls):
-    task = Task(name = "task", processes = [Process(name="process", cmdline=SIMPLEFORK_SCRIPT)])
+    task = Task(name="task", processes=[Process(name="process", cmdline=SIMPLEFORK_SCRIPT)])
     return task.interpolate()[0]
 
   def test_pg_is_killed(self):
     runner = self.start_runner()
-    tm = TaskMonitor(runner.pathspec, runner.task_id)
+    tm = TaskMonitor(runner.tempdir, runner.task_id)
     self.wait_until_running(tm)
     process_state, run_number = tm.get_active_processes()[0]
     assert process_state.process == 'process'

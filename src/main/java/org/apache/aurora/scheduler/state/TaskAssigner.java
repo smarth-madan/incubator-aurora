@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,97 +13,183 @@
  */
 package org.apache.aurora.scheduler.state;
 
+import java.util.Iterator;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javax.inject.Inject;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Function;
 import com.google.common.base.Optional;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.FluentIterable;
 
-import org.apache.aurora.scheduler.MesosTaskFactory;
+import com.twitter.common.inject.TimedInterceptor.Timed;
+import com.twitter.common.stats.Stats;
+
+import org.apache.aurora.scheduler.HostOffer;
 import org.apache.aurora.scheduler.ResourceSlot;
-import org.apache.aurora.scheduler.base.Tasks;
-import org.apache.aurora.scheduler.configuration.Resources;
-import org.apache.aurora.scheduler.filter.AttributeAggregate;
+import org.apache.aurora.scheduler.Resources;
+import org.apache.aurora.scheduler.base.TaskGroupKey;
 import org.apache.aurora.scheduler.filter.SchedulingFilter;
+import org.apache.aurora.scheduler.filter.SchedulingFilter.ResourceRequest;
+import org.apache.aurora.scheduler.filter.SchedulingFilter.UnusedResource;
 import org.apache.aurora.scheduler.filter.SchedulingFilter.Veto;
+import org.apache.aurora.scheduler.filter.SchedulingFilter.VetoGroup;
+import org.apache.aurora.scheduler.mesos.MesosTaskFactory;
+import org.apache.aurora.scheduler.offers.OfferManager;
 import org.apache.aurora.scheduler.storage.entities.IAssignedTask;
-import org.apache.aurora.scheduler.storage.entities.IScheduledTask;
-import org.apache.mesos.Protos.Offer;
 import org.apache.mesos.Protos.TaskInfo;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
+
+import static org.apache.aurora.gen.ScheduleStatus.LOST;
+import static org.apache.aurora.gen.ScheduleStatus.PENDING;
+import static org.apache.aurora.scheduler.storage.Storage.MutableStoreProvider;
+import static org.apache.mesos.Protos.Offer;
 
 /**
- * Responsible for matching a task against an offer.
+ * Responsible for matching a task against an offer and launching it.
  */
 public interface TaskAssigner {
-
   /**
-   * Tries to match a task against an offer.  If a match is found, the assigner should
-   * make the appropriate changes to the task and provide a non-empty result.
+   * Tries to match a task against an offer.  If a match is found, the assigner makes the
+   * appropriate changes to the task and requests task launch.
    *
-   * @param offer The resource offer.
-   * @param task The task to match against and optionally assign.
-   * @param attributeAggregate Attribute information for tasks in the job containing {@code task}.
-   * @return Instructions for launching the task if matching and assignment were successful.
+   * @param storeProvider Storage provider.
+   * @param resourceRequest The request for resources being scheduled.
+   * @param groupKey Task group key.
+   * @param taskId Task id to assign.
+   * @param slaveReservations Slave reservations.
+   * @return Assignment result.
    */
-  Optional<TaskInfo> maybeAssign(
-      Offer offer,
-      IScheduledTask task,
-      AttributeAggregate attributeAggregate);
+  boolean maybeAssign(
+      MutableStoreProvider storeProvider,
+      ResourceRequest resourceRequest,
+      TaskGroupKey groupKey,
+      String taskId,
+      Map<String, TaskGroupKey> slaveReservations);
 
   class TaskAssignerImpl implements TaskAssigner {
     private static final Logger LOG = Logger.getLogger(TaskAssignerImpl.class.getName());
 
+    @VisibleForTesting
+    static final Optional<String> LAUNCH_FAILED_MSG =
+        Optional.of("Unknown exception attempting to schedule task.");
+
+    private final AtomicLong launchFailures = Stats.exportLong("assigner_launch_failures");
+
     private final StateManager stateManager;
     private final SchedulingFilter filter;
     private final MesosTaskFactory taskFactory;
+    private final OfferManager offerManager;
 
     @Inject
     public TaskAssignerImpl(
         StateManager stateManager,
         SchedulingFilter filter,
-        MesosTaskFactory taskFactory) {
+        MesosTaskFactory taskFactory,
+        OfferManager offerManager) {
 
-      this.stateManager = checkNotNull(stateManager);
-      this.filter = checkNotNull(filter);
-      this.taskFactory = checkNotNull(taskFactory);
+      this.stateManager = requireNonNull(stateManager);
+      this.filter = requireNonNull(filter);
+      this.taskFactory = requireNonNull(taskFactory);
+      this.offerManager = requireNonNull(offerManager);
     }
 
-    private TaskInfo assign(Offer offer, IScheduledTask task) {
+    private TaskInfo assign(
+        MutableStoreProvider storeProvider,
+        Offer offer,
+        Set<String> requestedPorts,
+        String taskId) {
+
       String host = offer.getHostname();
-      Set<Integer> selectedPorts =
-          Resources.getPorts(offer, task.getAssignedTask().getTask().getRequestedPorts().size());
+      Set<Integer> selectedPorts = Resources.getPorts(offer, requestedPorts.size());
+      Preconditions.checkState(selectedPorts.size() == requestedPorts.size());
+
+      final Iterator<String> names = requestedPorts.iterator();
+      Map<String, Integer> portsByName = FluentIterable.from(selectedPorts)
+          .uniqueIndex(new Function<Object, String>() {
+            @Override
+            public String apply(Object input) {
+              return names.next();
+            }
+          });
+
       IAssignedTask assigned = stateManager.assignTask(
-          Tasks.id(task),
+          storeProvider,
+          taskId,
           host,
           offer.getSlaveId(),
-          selectedPorts);
+          portsByName);
       LOG.info(String.format("Offer on slave %s (id %s) is being assigned task for %s.",
-          host, offer.getSlaveId(), Tasks.id(task)));
+          host, offer.getSlaveId().getValue(), taskId));
       return taskFactory.createFrom(assigned, offer.getSlaveId());
     }
 
+    @Timed("assigner_maybe_assign")
     @Override
-    public Optional<TaskInfo> maybeAssign(
-        Offer offer,
-        IScheduledTask task,
-        AttributeAggregate attributeAggregate) {
+    public boolean maybeAssign(
+        MutableStoreProvider storeProvider,
+        ResourceRequest resourceRequest,
+        TaskGroupKey groupKey,
+        String taskId,
+        Map<String, TaskGroupKey> slaveReservations) {
 
-      Set<Veto> vetoes = filter.filter(
-          ResourceSlot.from(offer),
-          offer.getHostname(),
-          task.getAssignedTask().getTask(),
-          Tasks.id(task),
-          attributeAggregate);
-      if (vetoes.isEmpty()) {
-        return Optional.of(assign(offer, task));
-      } else {
-        LOG.fine("Slave " + offer.getHostname() + " vetoed task " + Tasks.id(task)
-            + ": " + vetoes);
-        return Optional.absent();
+      for (HostOffer offer : offerManager.getOffers(groupKey)) {
+        Optional<TaskGroupKey> reservedGroup = Optional.fromNullable(
+            slaveReservations.get(offer.getOffer().getSlaveId().getValue()));
+
+        if (reservedGroup.isPresent() && !reservedGroup.get().equals(groupKey)) {
+          // This slave is reserved for a different task group -> skip.
+          continue;
+        }
+        Set<Veto> vetoes = filter.filter(
+            new UnusedResource(ResourceSlot.from(offer.getOffer()), offer.getAttributes()),
+            resourceRequest);
+        if (vetoes.isEmpty()) {
+          TaskInfo taskInfo = assign(
+              storeProvider,
+              offer.getOffer(),
+              resourceRequest.getRequestedPorts(),
+              taskId);
+
+          try {
+            offerManager.launchTask(offer.getOffer().getId(), taskInfo);
+            return true;
+          } catch (OfferManager.LaunchException e) {
+            LOG.log(Level.WARNING, "Failed to launch task.", e);
+            launchFailures.incrementAndGet();
+
+            // The attempt to schedule the task failed, so we need to backpedal on the
+            // assignment.
+            // It is in the LOST state and a new task will move to PENDING to replace it.
+            // Should the state change fail due to storage issues, that's okay.  The task will
+            // time out in the ASSIGNED state and be moved to LOST.
+            stateManager.changeState(
+                storeProvider,
+                taskId,
+                Optional.of(PENDING),
+                LOST,
+                LAUNCH_FAILED_MSG);
+            return false;
+          }
+        } else {
+          if (Veto.identifyGroup(vetoes) == VetoGroup.STATIC) {
+            // Never attempt to match this offer/groupKey pair again.
+            offerManager.banOffer(offer.getOffer().getId(), groupKey);
+          }
+
+          LOG.fine("Slave " + offer.getOffer().getHostname()
+              + " vetoed task " + taskId + ": " + vetoes);
+          return false;
+        }
       }
+      return false;
     }
   }
 }

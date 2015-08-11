@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -29,6 +27,8 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
+import com.google.common.hash.HashFunction;
+import com.google.common.hash.Hashing;
 import com.twitter.common.base.Closure;
 import com.twitter.common.quantity.Amount;
 import com.twitter.common.quantity.Data;
@@ -55,17 +55,15 @@ import org.apache.aurora.gen.storage.Snapshot;
 import org.apache.aurora.gen.storage.Transaction;
 import org.apache.aurora.gen.storage.storageConstants;
 import org.apache.aurora.scheduler.base.JobKeys;
-import org.apache.aurora.scheduler.log.Log;
 import org.apache.aurora.scheduler.log.Log.Entry;
 import org.apache.aurora.scheduler.log.Log.Position;
 import org.apache.aurora.scheduler.log.Log.Stream;
-import org.apache.aurora.scheduler.storage.log.LogManager.StreamManager;
-import org.apache.aurora.scheduler.storage.log.LogManager.StreamManager.StreamTransaction;
 import org.easymock.EasyMock;
 import org.easymock.IArgumentMatcher;
 import org.junit.Before;
 import org.junit.Test;
 
+import static org.apache.aurora.scheduler.storage.log.SnapshotDeduplicator.SnapshotDeduplicatorImpl;
 import static org.easymock.EasyMock.expect;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -104,13 +102,19 @@ public class LogManagerTest extends EasyMockTest {
     return createStreamManager(NO_FRAMES_EVER_SIZE);
   }
 
-  private StreamManager createStreamManager(Amount<Integer, Data> maxEntrySize) {
-    return new StreamManager(stream, false, maxEntrySize);
+  private StreamManager createStreamManager(final Amount<Integer, Data> maxEntrySize) {
+    return new StreamManagerImpl(
+        stream,
+        new EntrySerializer.EntrySerializerImpl(maxEntrySize, Hashing.md5()),
+        false,
+        Hashing.md5(),
+        new SnapshotDeduplicatorImpl(),
+        false);
   }
 
   @Test
   public void testStreamManagerReadFromUnknownNone() throws CodingException {
-    expect(stream.readAll()).andReturn(Iterators.<Log.Entry>emptyIterator());
+    expect(stream.readAll()).andReturn(Iterators.emptyIterator());
 
     Closure<LogEntry> reader = createMock(new Clazz<Closure<LogEntry>>() { });
 
@@ -274,9 +278,10 @@ public class LogManagerTest extends EasyMockTest {
     Op deleteJob = Op.removeJob(new RemoveJob(JobKeys.from("role", "env", "name").newBuilder()));
     expectTransaction(position1, saveFrameworkId, deleteJob);
 
+    StreamManager streamManager = createNoMessagesStreamManager();
     control.replay();
 
-    StreamTransaction transaction = createNoMessagesStreamManager().startTransaction();
+    StreamTransaction transaction = streamManager.startTransaction();
     transaction.add(saveFrameworkId);
     transaction.add(deleteJob);
 
@@ -331,9 +336,9 @@ public class LogManagerTest extends EasyMockTest {
     Message message = frame(createLogEntry(saveFrameworkId));
     expectFrames(position1, message);
 
+    StreamManager streamManager = createStreamManager(message.chunkSize);
     control.replay();
 
-    StreamManager streamManager = createStreamManager(message.chunkSize);
     StreamTransaction transaction = streamManager.startTransaction();
     transaction.add(saveFrameworkId);
 
@@ -393,7 +398,13 @@ public class LogManagerTest extends EasyMockTest {
       }
     };
 
-    final StreamManager streamManager = new StreamManager(mockStream, false, message1.chunkSize);
+    final StreamManagerImpl streamManager = new StreamManagerImpl(
+        mockStream,
+        new EntrySerializer.EntrySerializerImpl(message1.chunkSize, Hashing.md5()),
+        false,
+        Hashing.md5(),
+        new SnapshotDeduplicatorImpl(),
+        false);
     StreamTransaction tr1 = streamManager.startTransaction();
     tr1.add(op1);
 
@@ -472,9 +483,10 @@ public class LogManagerTest extends EasyMockTest {
     reader.execute(transaction1);
     reader.execute(transaction2);
 
+    StreamManager streamManager = createStreamManager(message.chunkSize);
     control.replay();
 
-    createStreamManager(message.chunkSize).readFromBeginning(reader);
+    streamManager.readFromBeginning(reader);
   }
 
   @Test
@@ -496,7 +508,14 @@ public class LogManagerTest extends EasyMockTest {
 
     control.replay();
 
-    StreamManager streamManager = new StreamManager(stream, true, NO_FRAMES_EVER_SIZE);
+    HashFunction md5 = Hashing.md5();
+    StreamManagerImpl streamManager = new StreamManagerImpl(
+        stream,
+        new EntrySerializer.EntrySerializerImpl(NO_FRAMES_EVER_SIZE, md5),
+        true,
+        md5,
+        new SnapshotDeduplicatorImpl(),
+        false);
     streamManager.snapshot(snapshot);
     streamManager.readFromBeginning(reader);
   }

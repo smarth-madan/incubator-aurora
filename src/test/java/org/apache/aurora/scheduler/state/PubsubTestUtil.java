@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -17,15 +15,13 @@ package org.apache.aurora.scheduler.state;
 
 import java.util.Set;
 
-import com.google.inject.Binder;
+import com.google.common.util.concurrent.Service;
 import com.google.inject.Injector;
 import com.google.inject.Key;
 import com.google.inject.TypeLiteral;
-import com.twitter.common.application.StartupStage;
-import com.twitter.common.base.ExceptionalCommand;
 
+import org.apache.aurora.scheduler.AppStartup;
 import org.apache.aurora.scheduler.events.EventSink;
-import org.apache.aurora.scheduler.events.PubsubEventModule;
 
 /**
  * A convenience utility for unit tests that which to verify pubsub wiring.
@@ -35,15 +31,6 @@ public final class PubsubTestUtil {
 
   private PubsubTestUtil() {
     // Utility class.
-  }
-
-  /**
-   * Installs the pubsub system on the given binder.
-   *
-   * @param binder Binder to install pubsub system onto.
-   */
-  public static void installPubsub(Binder binder) {
-    PubsubEventModule.installForTest(binder);
   }
 
   /**
@@ -57,11 +44,11 @@ public final class PubsubTestUtil {
     // TODO(wfarner): Make it easier to write a unit test wired for pubsub events.
     // In this case, a trade-off was made to avoid installing several distant modules and providing
     // required bindings that seem unrelated from this code.
-    @SuppressWarnings("rawtypes")
-    Set<ExceptionalCommand> startupCommands = injector.getInstance(
-        Key.get(new TypeLiteral<Set<ExceptionalCommand>>() { }, StartupStage.class));
-    for (ExceptionalCommand<?> command : startupCommands) {
-      command.execute();
+    Set<Service> services = injector.getInstance(
+        Key.get(new TypeLiteral<Set<Service>>() { }, AppStartup.class));
+
+    for (Service service : services) {
+      service.startAsync().awaitRunning();
     }
     return injector.getInstance(EventSink.class);
   }

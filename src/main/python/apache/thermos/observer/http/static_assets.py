@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -17,8 +15,8 @@
 import mimetypes
 import os
 
-from bottle import HTTPResponse
 import pkg_resources
+from bottle import HTTPResponse
 from twitter.common import log
 from twitter.common.http.server import HttpServer
 
@@ -27,6 +25,7 @@ class StaticAssets(object):
   """
     Serve the /assets directory.
   """
+
   def __init__(self):
     self._assets = {}
     self._detect_assets()

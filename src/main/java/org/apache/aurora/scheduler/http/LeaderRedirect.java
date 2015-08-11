@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,7 +13,6 @@
  */
 package org.apache.aurora.scheduler.http;
 
-import java.net.InetSocketAddress;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
 
@@ -24,17 +21,17 @@ import javax.servlet.http.HttpServletRequest;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Optional;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.net.HostAndPort;
 import com.google.common.util.concurrent.Atomics;
-import com.twitter.common.application.modules.LocalServiceRegistry;
 import com.twitter.common.net.pool.DynamicHostSet;
 import com.twitter.common.net.pool.DynamicHostSet.HostChangeMonitor;
 import com.twitter.common.net.pool.DynamicHostSet.MonitorException;
 import com.twitter.thrift.Endpoint;
 import com.twitter.thrift.ServiceInstance;
+
+import static java.util.Objects.requireNonNull;
 
 /**
  * Redirect logic for finding the leading scheduler in the event that this process is not the
@@ -49,15 +46,15 @@ public class LeaderRedirect {
 
   private static final Logger LOG = Logger.getLogger(LeaderRedirect.class.getName());
 
-  private final LocalServiceRegistry serviceRegistry;
+  private final HttpService httpService;
   private final DynamicHostSet<ServiceInstance> schedulers;
 
   private final AtomicReference<ServiceInstance> leader = Atomics.newReference();
 
   @Inject
-  LeaderRedirect(LocalServiceRegistry serviceRegistry, DynamicHostSet<ServiceInstance> schedulers) {
-    this.serviceRegistry = Preconditions.checkNotNull(serviceRegistry);
-    this.schedulers = Preconditions.checkNotNull(schedulers);
+  LeaderRedirect(HttpService httpService, DynamicHostSet<ServiceInstance> schedulers) {
+    this.httpService = requireNonNull(httpService);
+    this.schedulers = requireNonNull(schedulers);
   }
 
   /**
@@ -87,9 +84,9 @@ public class LeaderRedirect {
   }
 
   private Optional<HostAndPort> getLocalHttp() {
-    InetSocketAddress localHttp = serviceRegistry.getAuxiliarySockets().get(HTTP_PORT_NAME);
-    return (localHttp == null) ? Optional.<HostAndPort>absent()
-        : Optional.of(HostAndPort.fromParts(localHttp.getHostName(), localHttp.getPort()));
+    HostAndPort localHttp = httpService.getAddress();
+    return (localHttp == null) ? Optional.absent()
+        : Optional.of(HostAndPort.fromParts(localHttp.getHostText(), localHttp.getPort()));
   }
 
   /**
@@ -130,13 +127,18 @@ public class LeaderRedirect {
           .append(req.getScheme())
           .append("://")
           .append(target.getHostText())
-          .append(":")
+          .append(':')
           .append(target.getPort())
-          .append(req.getRequestURI());
+          .append(
+              // If Jetty rewrote the path, we want to be sure to redirect to the original path
+              // rather than the rewritten path to be sure it's a route the UI code recognizes.
+              Optional.fromNullable(
+                  req.getAttribute(JettyServerModule.ORIGINAL_PATH_ATTRIBUTE_NAME))
+                  .or(req.getRequestURI()));
 
       String queryString = req.getQueryString();
       if (queryString != null) {
-        redirect.append("?").append(queryString);
+        redirect.append('?').append(queryString);
       }
 
       return Optional.of(redirect.toString());
@@ -165,6 +167,7 @@ public class LeaderRedirect {
         default:
           LOG.severe("Multiple schedulers detected, will not redirect: " + hostSet);
           leader.set(null);
+          break;
       }
     }
   }

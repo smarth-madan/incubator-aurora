@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,27 +14,27 @@
 package org.apache.aurora.scheduler.http;
 
 import java.io.IOException;
+import java.util.Objects;
 
 import javax.inject.Inject;
 import javax.servlet.FilterChain;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import javax.ws.rs.core.HttpHeaders;
 
 import com.google.common.base.Optional;
-import com.google.common.base.Preconditions;
-import com.twitter.common.net.http.filters.AbstractHttpFilter;
 
 /**
  * An HTTP filter that will redirect the request to the leading scheduler.
  */
-public class LeaderRedirectFilter extends AbstractHttpFilter {
+public class LeaderRedirectFilter extends AbstractFilter {
 
   private final LeaderRedirect redirector;
 
   @Inject
   LeaderRedirectFilter(LeaderRedirect redirector) {
-    this.redirector = Preconditions.checkNotNull(redirector);
+    this.redirector = Objects.requireNonNull(redirector);
   }
 
   @Override
@@ -45,7 +43,8 @@ public class LeaderRedirectFilter extends AbstractHttpFilter {
 
     Optional<String> leaderRedirect = redirector.getRedirectTarget(request);
     if (leaderRedirect.isPresent()) {
-      response.sendRedirect(leaderRedirect.get());
+      response.setStatus(HttpServletResponse.SC_TEMPORARY_REDIRECT);
+      response.setHeader(HttpHeaders.LOCATION, leaderRedirect.get());
     } else {
       chain.doFilter(request, response);
     }

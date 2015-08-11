@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -47,19 +45,29 @@ import com.twitter.thrift.ServiceInstance;
 import org.apache.aurora.GuiceUtils;
 import org.apache.aurora.gen.ServerInfo;
 import org.apache.aurora.scheduler.SchedulerModule;
+import org.apache.aurora.scheduler.SchedulerServicesModule;
 import org.apache.aurora.scheduler.async.AsyncModule;
 import org.apache.aurora.scheduler.events.PubsubEventModule;
 import org.apache.aurora.scheduler.filter.SchedulingFilterImpl;
-import org.apache.aurora.scheduler.http.ServletModule;
+import org.apache.aurora.scheduler.http.JettyServerModule;
+import org.apache.aurora.scheduler.mesos.SchedulerDriverModule;
 import org.apache.aurora.scheduler.metadata.MetadataModule;
+import org.apache.aurora.scheduler.offers.OffersModule;
+import org.apache.aurora.scheduler.preemptor.PreemptorModule;
+import org.apache.aurora.scheduler.pruning.PruningModule;
 import org.apache.aurora.scheduler.quota.QuotaModule;
+import org.apache.aurora.scheduler.reconciliation.ReconciliationModule;
+import org.apache.aurora.scheduler.scheduling.SchedulingModule;
+import org.apache.aurora.scheduler.sla.SlaModule;
 import org.apache.aurora.scheduler.state.StateModule;
 import org.apache.aurora.scheduler.stats.AsyncStatsModule;
 import org.apache.aurora.scheduler.storage.entities.IServerInfo;
+import org.apache.aurora.scheduler.updater.UpdaterModule;
 import org.apache.mesos.Scheduler;
 import org.apache.zookeeper.data.ACL;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
+
 import static com.twitter.common.base.MorePreconditions.checkNotBlank;
 
 import static org.apache.aurora.gen.apiConstants.THRIFT_API_VERSION;
@@ -67,17 +75,24 @@ import static org.apache.aurora.gen.apiConstants.THRIFT_API_VERSION;
 /**
  * Binding module for the aurora scheduler application.
  */
-class AppModule extends AbstractModule {
+public class AppModule extends AbstractModule {
   private static final Logger LOG = Logger.getLogger(AppModule.class.getName());
 
   private final String clusterName;
   private final String serverSetPath;
   private final ClientConfig zkClientConfig;
+  private final String statsUrlPrefix;
 
-  AppModule(String clusterName, String serverSetPath, ClientConfig zkClientConfig) {
+  AppModule(
+      String clusterName,
+      String serverSetPath,
+      ClientConfig zkClientConfig,
+      String statsUrlPrefix) {
+
     this.clusterName = checkNotBlank(clusterName);
     this.serverSetPath = checkNotBlank(serverSetPath);
-    this.zkClientConfig = checkNotNull(zkClientConfig);
+    this.zkClientConfig = requireNonNull(zkClientConfig);
+    this.statsUrlPrefix = statsUrlPrefix;
   }
 
   @Override
@@ -93,22 +108,32 @@ class AppModule extends AbstractModule {
         IServerInfo.build(
             new ServerInfo()
                 .setClusterName(clusterName)
-                .setThriftAPIVersion(THRIFT_API_VERSION)));
+                .setThriftAPIVersion(THRIFT_API_VERSION)
+                .setStatsUrlPrefix(statsUrlPrefix)));
 
     // Filter layering: notifier filter -> base impl
-    PubsubEventModule.bind(binder(), SchedulingFilterImpl.class);
+    install(new PubsubEventModule(true));
+    PubsubEventModule.bindSchedulingFilterDelegate(binder()).to(SchedulingFilterImpl.class);
     bind(SchedulingFilterImpl.class).in(Singleton.class);
 
     LifecycleModule.bindStartupAction(binder(), RegisterShutdownStackPrinter.class);
 
     install(new AsyncModule());
+    install(new OffersModule());
+    install(new PruningModule());
+    install(new ReconciliationModule());
+    install(new SchedulingModule());
     install(new AsyncStatsModule());
     install(new MetadataModule());
     install(new QuotaModule());
-    install(new ServletModule());
+    install(new JettyServerModule());
+    install(new PreemptorModule());
+    install(new SchedulerDriverModule());
+    install(new SchedulerServicesModule());
     install(new SchedulerModule());
     install(new StateModule());
-
+    install(new SlaModule());
+    install(new UpdaterModule());
     bind(StatsProvider.class).toInstance(Stats.STATS_PROVIDER);
   }
 

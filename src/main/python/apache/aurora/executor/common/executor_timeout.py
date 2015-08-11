@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -15,8 +13,8 @@
 #
 
 from twitter.common import log
-from twitter.common.quantity import Amount, Time
 from twitter.common.exceptions import ExceptionalThread
+from twitter.common.quantity import Amount, Time
 
 
 class ExecutorTimeout(ExceptionalThread):

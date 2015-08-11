@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -17,26 +15,38 @@
 python_test_suite(
   name = 'all',
   dependencies = [
-    pants(':test_aurora_job_key'),
-    pants(':test_cluster'),
-    pants(':test_clusters'),
-    pants(':test_cluster_option'),
-    pants(':test_http_signaler'),
+    ':test_aurora_job_key',
+    ':test_cluster',
+    ':test_clusters',
+    ':test_cluster_option',
+    ':test_http_signaler',
+    ':test_pex_version',
+    ':test_shellify',
+    ':test_transport',
   ]
 )
 
 python_tests(name = 'test_aurora_job_key',
   sources = ['test_aurora_job_key.py'],
   dependencies = [
-    pants('src/main/python/apache/aurora/common:aurora_job_key')
+    'src/main/python/apache/aurora/common'
   ],
+)
+
+python_tests(
+  name = 'test_pex_version',
+  sources = ['test_pex_version.py'],
+  dependencies = [
+    '3rdparty/python:mock',
+    'src/main/python/apache/aurora/common',
+  ]
 )
 
 python_tests(
   name = 'test_cluster',
   sources = ['test_cluster.py'],
   dependencies = [
-    pants('src/main/python/apache/aurora/common:cluster'),
+    'src/main/python/apache/aurora/common',
   ]
 )
 
@@ -44,9 +54,8 @@ python_tests(
   name = 'test_clusters',
   sources = ['test_clusters.py'],
   dependencies = [
-    pants('3rdparty/python:pyyaml'),
-    pants('3rdparty/python:twitter.common.contextutil'),
-    pants('src/main/python/apache/aurora/common:clusters'),
+    '3rdparty/python:twitter.common.contextutil',
+    'src/main/python/apache/aurora/common',
   ]
 )
 
@@ -54,10 +63,8 @@ python_tests(
   name = 'test_cluster_option',
   sources = ['test_cluster_option.py'],
   dependencies = [
-    pants('3rdparty/python:twitter.common.options'),
-    pants('src/main/python/apache/aurora/common:cluster'),
-    pants('src/main/python/apache/aurora/common:cluster_option'),
-    pants('src/main/python/apache/aurora/common:clusters'),
+    '3rdparty/python:twitter.common.options',
+    'src/main/python/apache/aurora/common',
   ]
 )
 
@@ -65,7 +72,25 @@ python_tests(
   name = 'test_http_signaler',
   sources = ['test_http_signaler.py'],
   dependencies = [
-    pants('3rdparty/python:mox'),
-    pants('src/main/python/apache/aurora/common:http_signaler'),
+    '3rdparty/python:mox',
+    'src/main/python/apache/aurora/common',
+  ]
+)
+
+python_tests(
+  name = 'test_shellify',
+  sources = ['test_shellify.py'],
+  dependencies = [
+    'src/main/python/apache/aurora/common',
+  ]
+)
+
+python_tests(
+  name = 'test_transport',
+  sources = ['test_transport.py'],
+  dependencies = [
+    'api/src/main/thrift/org/apache/aurora/gen',
+    'src/main/python/apache/aurora/common',
+    '3rdparty/python:mock',
   ]
 )

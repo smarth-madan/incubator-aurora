@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -13,35 +11,118 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+import unittest
 
-from gen.apache.aurora.AuroraSchedulerManager import Client
-from gen.apache.aurora.ttypes import Response, ResponseCode, Result, ScheduleStatusResult, Identity, TaskQuery
-from apache.aurora.client.api import AuroraClientAPI
+from mock import create_autospec
+
 from apache.aurora.client.api.job_monitor import JobMonitor
+from apache.aurora.common.aurora_job_key import AuroraJobKey
 
-from mox import MoxTestBase
+from ...api_util import SchedulerThriftApiSpec
 
-ROLE = 'johndoe'
-ENV = 'test'
-JOB_NAME = 'test_job'
+from gen.apache.aurora.api.ttypes import (
+    AssignedTask,
+    JobKey,
+    Response,
+    ResponseCode,
+    ResponseDetail,
+    Result,
+    ScheduledTask,
+    ScheduleStatus,
+    ScheduleStatusResult,
+    TaskEvent,
+    TaskQuery
+)
 
 
-class JobMonitorTest(MoxTestBase):
+class FakeEvent(object):
+  def __init__(self):
+    self._is_set = False
+
+  def wait(self, seconds):
+    pass
+
+  def is_set(self):
+    return self._is_set
+
+  def set(self):
+    self._is_set = True
+
+
+class JobMonitorTest(unittest.TestCase):
 
   def setUp(self):
+    self._scheduler = create_autospec(spec=SchedulerThriftApiSpec, instance=True)
+    self._job_key = AuroraJobKey('cl', 'johndoe', 'test', 'test_job')
+    self._event = FakeEvent()
 
-    super(JobMonitorTest, self).setUp()
-    self.mock_api = self.mox.CreateMock(AuroraClientAPI)
-    self.mock_scheduler = self.mox.CreateMock(Client)
-    self.mock_api.scheduler_proxy = self.mock_scheduler
+  def create_task(self, status, id):
+    return ScheduledTask(
+        assignedTask=AssignedTask(
+            instanceId=id,
+            taskId=id),
+        status=status,
+        taskEvents=[TaskEvent(
+            status=status,
+            timestamp=10)]
+    )
 
-  def test_init(self):
-    result = Result(scheduleStatusResult=ScheduleStatusResult(tasks=[]))
-    response = Response(responseCode=ResponseCode.OK, message="test", result=result)
-    query = TaskQuery(owner=Identity(role=ROLE), environment=ENV, jobName=JOB_NAME)
+  def mock_get_tasks(self, tasks, response_code=None):
+    response_code = ResponseCode.OK if response_code is None else response_code
+    resp = Response(responseCode=response_code, details=[ResponseDetail(message='test')])
+    resp.result = Result(scheduleStatusResult=ScheduleStatusResult(tasks=tasks))
+    self._scheduler.getTasksWithoutConfigs.return_value = resp
 
-    self.mock_scheduler.getTasksStatus(query).AndReturn(response)
+  def expect_task_status(self, once=False, instances=None):
+    query = TaskQuery(jobKeys=[
+        JobKey(role=self._job_key.role, environment=self._job_key.env, name=self._job_key.name)])
+    if instances is not None:
+      query.instanceIds = frozenset([int(s) for s in instances])
 
-    self.mox.ReplayAll()
+    if once:
+      self._scheduler.getTasksWithoutConfigs.assert_called_once_with(query)
+    else:
+      self._scheduler.getTasksWithoutConfigs.assert_called_with(query)
 
-    JobMonitor(self.mock_api, ROLE, ENV, JOB_NAME)
+  def test_wait_until_state(self):
+    self.mock_get_tasks([
+        self.create_task(ScheduleStatus.RUNNING, '1'),
+        self.create_task(ScheduleStatus.RUNNING, '2'),
+        self.create_task(ScheduleStatus.FAILED, '3'),
+    ])
+
+    monitor = JobMonitor(self._scheduler, self._job_key)
+    assert monitor.wait_until(monitor.running_or_finished)
+    self.expect_task_status(once=True)
+
+  def test_empty_job_succeeds(self):
+    self.mock_get_tasks([])
+
+    monitor = JobMonitor(self._scheduler, self._job_key)
+    assert monitor.wait_until(monitor.running_or_finished)
+    self.expect_task_status(once=True)
+
+  def test_wait_with_instances(self):
+    self.mock_get_tasks([
+        self.create_task(ScheduleStatus.FAILED, '2'),
+    ])
+
+    monitor = JobMonitor(self._scheduler, self._job_key)
+    assert monitor.wait_until(monitor.terminal, instances=[2])
+    self.expect_task_status(once=True, instances=[2])
+
+  def test_wait_until_timeout(self):
+    self.mock_get_tasks([
+        self.create_task(ScheduleStatus.RUNNING, '1'),
+        self.create_task(ScheduleStatus.RUNNING, '2'),
+        self.create_task(ScheduleStatus.RUNNING, '3'),
+    ])
+
+    monitor = JobMonitor(self._scheduler, self._job_key, terminating_event=self._event)
+    assert not monitor.wait_until(monitor.terminal, with_timeout=True)
+    self.expect_task_status()
+
+  def test_terminated_exits_immediately(self):
+    self._event.set()
+    monitor = JobMonitor(self._scheduler, self._job_key, terminating_event=self._event)
+    assert monitor.wait_until(monitor.terminal)

@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,7 +13,8 @@
  */
 package org.apache.aurora.scheduler.app;
 
-import com.google.common.base.Preconditions;
+import java.util.Objects;
+
 import com.twitter.common.logging.RootLogConfig;
 import com.twitter.common.logging.RootLogConfig.Configuration;
 import com.twitter.common.logging.log4j.GlogLayout;
@@ -38,7 +37,7 @@ final class Log4jConfigurator {
    * @param glogConfig The glog configuration in effect.
    */
   static void configureConsole(Configuration glogConfig) {
-    Preconditions.checkNotNull(glogConfig);
+    Objects.requireNonNull(glogConfig);
 
     BasicConfigurator.configure(
         new ConsoleAppender(new GlogLayout(), ConsoleAppender.SYSTEM_ERR));

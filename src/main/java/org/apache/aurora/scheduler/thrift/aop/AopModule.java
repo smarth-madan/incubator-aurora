@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -45,6 +43,7 @@ import org.apache.aurora.GuiceUtils;
 import org.apache.aurora.auth.CapabilityValidator;
 import org.apache.aurora.gen.AuroraAdmin;
 import org.apache.aurora.gen.AuroraSchedulerManager;
+import org.apache.aurora.gen.Response;
 import org.apache.aurora.scheduler.thrift.auth.DecoratedThrift;
 
 /**
@@ -60,7 +59,7 @@ public class AopModule extends AbstractModule {
   private static final Arg<Boolean> ENABLE_JOB_CREATION = Arg.create(true);
 
   private static final Matcher<? super Class<?>> THRIFT_IFACE_MATCHER =
-      Matchers.subclassesOf(AuroraAdmin.Iface.class)
+      Matchers.subclassesOf(AnnotatedAuroraAdmin.class)
           .and(Matchers.annotatedWith(DecoratedThrift.class));
 
   private final Map<String, Boolean> toggledMethods;
@@ -88,8 +87,12 @@ public class AopModule extends AbstractModule {
     requireBinding(CapabilityValidator.class);
 
     // Layer ordering:
-    // Log -> CapabilityValidator -> FeatureToggle -> StatsExporter -> APIVersion ->
+    // APIVersion -> Log -> CapabilityValidator -> FeatureToggle -> StatsExporter ->
     // SchedulerThriftInterface
+
+    // It's important for this interceptor to be registered first to ensure it's at the 'top' of
+    // the stack and the standard message is always applied.
+    bindThriftDecorator(new ServerInfoInterceptor());
 
     // TODO(Sathya): Consider using provider pattern for constructing interceptors to facilitate
     // unit testing without the creation of Guice injectors.
@@ -128,7 +131,6 @@ public class AopModule extends AbstractModule {
     });
     bindThriftDecorator(new FeatureToggleInterceptor());
     bindThriftDecorator(new ThriftStatsExporterInterceptor());
-    bindThriftDecorator(new ServerInfoInterceptor());
   }
 
   private void bindThriftDecorator(MethodInterceptor interceptor) {
@@ -141,7 +143,10 @@ public class AopModule extends AbstractModule {
       Matcher<? super Class<?>> classMatcher,
       MethodInterceptor interceptor) {
 
-    binder.bindInterceptor(classMatcher, Matchers.any(), interceptor);
+    binder.bindInterceptor(
+        classMatcher,
+        Matchers.returns(Matchers.subclassesOf(Response.class)),
+        interceptor);
     binder.requestInjection(interceptor);
   }
 
@@ -154,8 +159,8 @@ public class AopModule extends AbstractModule {
       for (Map.Entry<String, Boolean> toggleMethod : toggleMethods.entrySet()) {
         Predicate<String> enableMethod = Predicates.or(
             toggleMethod.getValue()
-                ? Predicates.<String>alwaysTrue()
-                : Predicates.<String>alwaysFalse(),
+                ? Predicates.alwaysTrue()
+                : Predicates.alwaysFalse(),
             Predicates.not(Predicates.equalTo(toggleMethod.getKey())));
         builder = Predicates.and(builder, enableMethod);
       }

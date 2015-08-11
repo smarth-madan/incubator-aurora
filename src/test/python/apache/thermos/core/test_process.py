@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,13 +12,14 @@
 # limitations under the License.
 #
 
-import os
 import grp
+import os
 import pwd
 import random
-import threading
 import time
 
+import mock
+import pytest
 from twitter.common.contextutil import temporary_dir
 from twitter.common.dirutil import safe_mkdir
 from twitter.common.recordio import ThriftRecordReader
@@ -30,27 +29,26 @@ from apache.thermos.core.process import Process
 
 from gen.apache.thermos.ttypes import RunnerCkpt
 
-import mock
-import pytest
-
 
 class TestProcess(Process):
   def execute(self):
     super(TestProcess, self).execute()
     os._exit(0)
+
   def finish(self):
     pass
 
 
 def wait_for_rc(checkpoint, timeout=5.0):
   start = time.time()
-  trr = ThriftRecordReader(open(checkpoint), RunnerCkpt)
-  while time.time() < start + timeout:
-    record = trr.read()
-    if record and record.process_status and record.process_status.return_code is not None:
-      return record.process_status.return_code
-    else:
-      time.sleep(0.1)
+  with open(checkpoint) as fp:
+    trr = ThriftRecordReader(fp, RunnerCkpt)
+    while time.time() < start + timeout:
+      record = trr.read()
+      if record and record.process_status and record.process_status.return_code is not None:
+        return record.process_status.return_code
+      else:
+        time.sleep(0.1)
 
 
 def get_other_nonroot_user():
@@ -61,16 +59,26 @@ def get_other_nonroot_user():
   return user
 
 
+def make_taskpath(td):
+  return TaskPath(
+      root=td,
+      task_id='task',
+      process='process',
+      run=0,
+      log_dir=os.path.join(td, '.logs'))
+
+
 def setup_sandbox(td, taskpath):
   sandbox = os.path.join(td, 'sandbox')
   safe_mkdir(sandbox)
+  safe_mkdir(taskpath.getpath('process_logbase'))
   safe_mkdir(os.path.dirname(taskpath.getpath('process_checkpoint')))
   return sandbox
 
 
 def test_simple_process():
   with temporary_dir() as td:
-    taskpath = TaskPath(root=td, task_id='task', process='process', run=0)
+    taskpath = make_taskpath(td)
     sandbox = setup_sandbox(td, taskpath)
 
     p = TestProcess('process', 'echo hello world', 0, taskpath, sandbox)
@@ -92,12 +100,12 @@ def test_simple_process():
 def test_simple_process_other_user(*args):
   with temporary_dir() as td:
     some_user = get_other_nonroot_user()
-    taskpath = TaskPath(root=td, task_id='task', process='process', run=0)
+    taskpath = make_taskpath(td)
     sandbox = setup_sandbox(td, taskpath)
 
     p = TestProcess('process', 'echo hello world', 0, taskpath, sandbox, user=some_user.pw_name)
     p.start()
-    rc = wait_for_rc(taskpath.getpath('process_checkpoint'))
+    wait_for_rc(taskpath.getpath('process_checkpoint'))
 
     # since we're not actually root, the best we can do is check the right things were attempted
     assert os.setgroups.calledwith([g.gr_gid for g in grp.getgrall() if some_user.pw_name in g])
@@ -107,22 +115,27 @@ def test_simple_process_other_user(*args):
 
 def test_other_user_fails_nonroot():
   with temporary_dir() as td:
-    taskpath = TaskPath(root=td, task_id='task', process='process', run=0)
+    taskpath = make_taskpath(td)
     sandbox = setup_sandbox(td, taskpath)
-
+    process = TestProcess(
+        'process',
+        'echo hello world',
+        0,
+        taskpath,
+        sandbox,
+        user=get_other_nonroot_user().pw_name)
     with pytest.raises(Process.PermissionError):
-      p = TestProcess('process', 'echo hello world', 0, taskpath, sandbox,
-            user=get_other_nonroot_user().pw_name)
+      process.start()
 
 
 def test_log_permissions():
   with temporary_dir() as td:
-    taskpath = TaskPath(root=td, task_id='task', process='process', run=0)
+    taskpath = make_taskpath(td)
     sandbox = setup_sandbox(td, taskpath)
 
     p = TestProcess('process', 'echo hello world', 0, taskpath, sandbox)
     p.start()
-    rc = wait_for_rc(taskpath.getpath('process_checkpoint'))
+    wait_for_rc(taskpath.getpath('process_checkpoint'))
 
     stdout = taskpath.with_filename('stdout').getpath('process_logdir')
     stderr = taskpath.with_filename('stderr').getpath('process_logdir')
@@ -140,12 +153,12 @@ def test_log_permissions():
 def test_log_permissions_other_user(*mocks):
   with temporary_dir() as td:
     some_user = get_other_nonroot_user()
-    taskpath = TaskPath(root=td, task_id='task', process='process', run=0)
+    taskpath = make_taskpath(td)
     sandbox = setup_sandbox(td, taskpath)
 
     p = TestProcess('process', 'echo hello world', 0, taskpath, sandbox, user=some_user.pw_name)
     p.start()
-    rc = wait_for_rc(taskpath.getpath('process_checkpoint'))
+    wait_for_rc(taskpath.getpath('process_checkpoint'))
 
     # since we're not actually root, the best we can do is check the right things were attempted
     stdout = taskpath.with_filename('stdout').getpath('process_logdir')
@@ -159,7 +172,7 @@ def test_log_permissions_other_user(*mocks):
 def test_cloexec():
   def run_with_class(process_class):
     with temporary_dir() as td:
-      taskpath = TaskPath(root=td, task_id='task', process='process', run=0)
+      taskpath = make_taskpath(td)
       sandbox = setup_sandbox(td, taskpath)
       with open(os.path.join(sandbox, 'silly_pants'), 'w') as silly_pants:
         p = process_class('process', 'echo test >&%s' % silly_pants.fileno(),

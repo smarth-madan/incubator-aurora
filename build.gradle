@@ -1,6 +1,4 @@
 /*
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -13,42 +11,203 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import org.apache.aurora.build.CoverageReportCheck
+import org.gradle.api.JavaVersion
 
-apply plugin: 'about'
+plugins {
+  id 'com.eriwen.gradle.js' version '1.12.1'
+  id 'com.github.ben-manes.versions' version '0.10.1'
+  id 'com.github.hierynomus.license' version '0.11.0'
+  id 'me.champeau.gradle.jmh' version '0.2.0'
+}
+
 apply plugin: 'application'
 apply plugin: 'checkstyle'
-apply plugin: 'idea'
+apply plugin: 'findbugs'
 apply plugin: 'jacoco'
-apply plugin: 'java'
-apply plugin: 'license'
-apply plugin: 'maven-publish'
-apply plugin: 'project-report'
-apply plugin: 'jetty'
-apply plugin: 'versions'
-apply plugin: 'war'
+apply plugin: 'pmd'
 
-buildscript {
+def minJavaVersion = JavaVersion.VERSION_1_8;
+
+allprojects {
+  apply plugin: 'java'
+  apply plugin: 'idea'
+  apply plugin: 'maven-publish'
+  apply plugin: 'project-report'
+
+  buildDir = 'dist'
+
   repositories {
     mavenCentral()
+    maven {
+      url 'https://maven.twttr.com/'
+    }
   }
-  dependencies {
-    classpath 'com.github.ben-manes:gradle-versions-plugin:0.4'
-    classpath 'com.github.goldin.plugins.gradle:about:0.3.1'
-    classpath 'nl.javadude.gradle.plugins:license-gradle-plugin:0.7.0'
+
+  compileJava {
+    sourceCompatibility = minJavaVersion
+    targetCompatibility = minJavaVersion
+  }
+
+  group 'org.apache.aurora'
+  version = file("${rootDir}/.auroraversion").text.trim().toUpperCase()
+  if (version.contains('/')) {
+    throw new GradleException('''
+*******************************************************************************
+The application version string read by gradle is invalid.  This is known to
+happen when building on Windows, or within vagrant with a Windows host.
+You can work around this issue by cloning git _within_ vagrant and building
+from there.
+
+For more details, please see https://issues.apache.org/jira/browse/AURORA-1169
+*******************************************************************************
+''')
+  }
+
+  task sourceJar(type: Jar) {
+    from sourceSets.main.allJava
+  }
+
+  if (project.hasProperty('internalMavenUrl')) {
+    publishing {
+      repositories {
+        maven {
+          credentials {
+            username = internalMavenUser
+            password = internalMavenPass
+          }
+          url internalMavenUrl
+        }
+      }
+    }
+  }
+
+  ext.junitRev = '4.12'
+  ext.log4jRev = '1.2.17'
+  ext.gsonRev = '2.3.1'
+  ext.guavaRev = '16.0'
+  ext.slf4jRev = '1.7.12'
+  ext.thriftRev = '0.9.1'
+
+  configurations {
+    compile {
+      exclude module: 'junit-dep'
+      // ResolutionStrategy needs to be set in the allprojects block otherwise dependent projects
+      // will not inherit it. Note that dependencies still need to be specified in a dependencies
+      // block - this only affects strategy.
+      // See http://forums.gradle.org/gradle/topics/shouldnt-resolutionstrategy-affect-depending-projects-transitive-dependencies
+      resolutionStrategy {
+        failOnVersionConflict()
+        force "org.slf4j:slf4j-api:${slf4jRev}"
+        force "com.google.code.gson:gson:${gsonRev}"
+        force "log4j:log4j:${log4jRev}"
+        force "junit:junit:${junitRev}"
+        // Force versions based on inter-dependency collisions
+        force "org.hamcrest:hamcrest-core:1.3"
+        force "org.apache.thrift:libthrift:${thriftRev}"
+        force "org.slf4j:slf4j-jdk14:${slf4jRev}"
+      }
+    }
   }
 }
 
-buildDir = 'dist'
+project(':api') {
+  apply plugin: org.apache.aurora.build.ThriftPlugin
+  apply plugin: org.apache.aurora.build.ThriftEntitiesPlugin
+
+  task checkPython << {
+    def python27Executable = ['python2.7', 'python'].find { python ->
+      try {
+        def check = "import sys; sys.exit(0 if sys.version_info >= (2,7) and sys.version_info < (3,) else 1)"
+        return [python, "-c", check].execute().waitFor() == 0
+      } catch (IOException e) {
+        return false
+      }
+    }
+
+    if (python27Executable == null) {
+      throw new GradleException('Build requires Python 2.7.')
+    } else {
+      thriftEntities.python = python27Executable
+    }
+  }
+  generateThriftEntitiesJava.dependsOn checkPython
+
+  tasks.withType(Jar) {
+    baseName "aurora-api"
+  }
+
+  publishing {
+    publications {
+      mavenJava(MavenPublication) {
+        from components.java
+
+        artifactId "aurora-api"
+
+        artifact sourceJar {
+          classifier "sources"
+        }
+      }
+    }
+  }
+
+  thrift {
+    version = thriftRev
+    resourcePrefix = 'org/apache/aurora/scheduler/gen/client'
+  }
+
+  thriftEntities {
+    gsonRev = project.gsonRev
+    guavaRev = project.guavaRev
+    inputFiles = fileTree("src/main/thrift/org/apache/aurora/gen").matching {
+      include "**/*.thrift"
+    }
+  }
+
+  idea {
+    module {
+      jdkName = '1.8'
+
+      [thrift.genJavaDir, thriftEntities.genJavaDir].each {
+        sourceDirs += it
+        generatedSourceDirs += it
+      }
+
+      scopes.COMPILE.plus += [parent.configurations.jmh]
+
+      // These directories must exist, else the plugin omits them from the
+      // generated project. Since this is executed during the configuration
+      // lifecycle phase, dependency tasks have not yet run and created
+      // the directories themselves.
+      // By default, the idea module [1] excludes are set to
+      // [project.buildDir, project.file('.gradle')]
+      // This has the side-effect of also excluding our generated sources [2].  Due to the way
+      // directory exclusion works in idea, you can't exclude a directory and include a child of that
+      // directory. Clearing the excludes seems to have no ill side-effects, making it preferable to
+      // other possible approaches.
+      //
+      // [1] http://www.gradle.org/docs/current/dsl/org.gradle.plugins.ide.idea.model.IdeaModule.html
+      // [2] http://issues.gradle.org/browse/GRADLE-1174
+      excludeDirs = [file(".gradle")]
+      [
+          "classes",
+          "dependency-cache",
+          "docs",
+          "jacoco",
+          "reports",
+          "test-results",
+          "tmp"
+      ].each {
+        excludeDirs << file("$buildDir/$it")
+      }
+    }
+  }
+}
+
 def generatedDir = "$buildDir/generated-src"
-def generatedJavaDir = "$generatedDir/gen-java"
-def generatedJSDir = "$generatedDir/gen-js"
+def httpAssetsPath = 'scheduler/assets'
 
 compileJava {
-  sourceCompatibility = 1.7
-  targetCompatibility = 1.7
-}
-
-tasks.matching { it instanceof Compile && it.getName() != 'compileGeneratedJava' }.all {
   options.compilerArgs << '-Werror'
   options.compilerArgs << '-Xlint:all'
   // Don't fail for annotations not claimed by annotation processors.
@@ -57,264 +216,224 @@ tasks.matching { it instanceof Compile && it.getName() != 'compileGeneratedJava'
   options.compilerArgs << '-Xlint:-serial'
 }
 
+task enforceVersion {
+  def foundVersion = JavaVersion.current();
+  if (foundVersion < minJavaVersion) {
+    throw new GradleException("Build requires at least Java ${minJavaVersion}; but ${foundVersion}"
+        + " was found. Consider setting JAVA_HOME to select a specific JDK on your system.");
+  }
+}
+
+compileJava.dependsOn(enforceVersion);
+
 task wrapper(type: Wrapper) {
-  gradleVersion = '1.11'
+  gradleVersion = project(':buildSrc').GRADLE_VERSION
 }
 
-task sourceJar(type: Jar) {
-  from sourceSets.main.allJava
-}
-
-group 'org.apache.aurora'
-version = file('.auroraversion').text.trim().toUpperCase()
-
+// TODO(ksweeney): Consider pushing this down to API - the scheduler implementation itself should
+// only be consumed as an application.
 publishing {
   publications {
-    maven(MavenPublication) {
-      artifactId 'aurora-scheduler'
+    mavenJava(MavenPublication) {
       from components.java
+
+      artifactId 'aurora-scheduler'
 
       artifact sourceJar {
         classifier "sources"
       }
     }
   }
-  if (project.hasProperty('internalMavenUrl')) {
-    repositories {
-      maven {
-        credentials {
-          username = internalMavenUser
-          password = internalMavenPass
-        }
-        url internalMavenUrl
-      }
-    }
-  }
-}
-
-repositories {
-  mavenCentral()
-  maven {
-    url 'http://maven.twttr.com/'
-  }
 }
 
 sourceSets {
-  test {
-    resources {
-      srcDir 'src/main/resources'
-      srcDir 'src/test/resources'
-    }
-  }
-  generated {
-    java.srcDirs = [generatedDir]
-  }
   main {
-    compileClasspath += sourceSets.generated.output
     resources {
       srcDir '3rdparty/javascript'
-      srcDir generatedJSDir
     }
-  }
-  test {
-    compileClasspath += sourceSets.generated.output
-    runtimeClasspath += sourceSets.generated.output
-  }
-}
-/*  A note on libthrift: All of com.twitter.common depends on libthrift 0.5.x. We depend on
-    libthrift 0.9.x. There are binary incompatibilities between the two versions and resolving
-    them involved forking com.twitter.common classes into Aurora to use the new libthrift API. Be
-    very cautious when either upgrading libthrift or com.twitter.common dependencies!!!
- */
-
-jar {
-  dependsOn 'about'
-  from sourceSets.generated.output
-  manifest {
-    attributes('Created-By': 'Gradle')
-    attributes('Main-Class': 'org.apache.aurora.scheduler.app.SchedulerMain')
   }
 }
 
 dependencies {
-  def jerseyRev = '1.17.1'
-  def libthriftRev = '0.9.1'
-  def log4jRev = '1.2.17'
-  def slf4jRev = '1.6.1'
-  def junitRev = '4.11'
+  def guiceRev = '3.0'
+  def jerseyRev = '1.18.1'
+  def shiroRev = '1.2.3'
 
-  def guavaDep = 'com.google.guava:guava:15.0'
-  def thriftLib = "org.apache.thrift:libthrift:${libthriftRev}"
+  def gsonDep = "com.google.code.gson:gson:${gsonRev}"
+  def guavaDep = "com.google.guava:guava:${guavaRev}"
+  // NOTE: We are using the jetty 7.x series due to a large number of dependencies impacted
+  // by 8.x and later resulting from using newer javax.servlet servlet-api.
+  def jettyDep = '7.6.15.v20140411'
+
+  compile project(':api')
 
   compile 'aopalliance:aopalliance:1.0'
-  compile 'com.google.code.findbugs:jsr305:1.3.9'
-  compile guavaDep
-  compile 'com.google.inject:guice:3.0'
+  compile 'com.google.code.findbugs:jsr305:2.0.1'
+  compile "com.google.inject:guice:${guiceRev}"
+  compile "com.google.inject.extensions:guice-assistedinject:${guiceRev}"
   compile 'com.google.protobuf:protobuf-java:2.5.0'
+  compile 'com.h2database:h2:1.4.187'
   compile "com.sun.jersey:jersey-core:${jerseyRev}"
   compile "com.sun.jersey:jersey-json:${jerseyRev}"
   compile "com.sun.jersey:jersey-server:${jerseyRev}"
   compile "com.sun.jersey:jersey-servlet:${jerseyRev}"
-  compile "com.sun.jersey.contribs:jersey-spring:${jerseyRev}"
   compile "com.sun.jersey.contribs:jersey-guice:${jerseyRev}"
-  compile 'commons-lang:commons-lang:2.5'
   compile 'javax.inject:javax.inject:1'
   compile 'javax.servlet:servlet-api:2.5'
   compile "log4j:log4j:${log4jRev}"
   compile 'org.antlr:stringtemplate:3.2.1'
-  compile 'org.apache.mesos:mesos:0.17.0'
-  compile thriftLib
+  compile 'org.apache.mesos:mesos:0.22.0'
+  compile("org.apache.shiro:shiro-guice:${shiroRev}") {
+    // TODO(ksweeney): Remove this exclusion when https://issues.apache.org/jira/browse/SHIRO-496 is resolved.
+    exclude group: 'com.google.guava'
+  }
+  compile "org.apache.shiro:shiro-web:${shiroRev}"
   compile 'org.apache.zookeeper:zookeeper:3.3.4'
-  compile "org.slf4j:slf4j-api:${slf4jRev}"
+  compile "org.eclipse.jetty:jetty-rewrite:${jettyDep}"
+  compile "org.eclipse.jetty:jetty-server:${jettyDep}"
+  compile "org.eclipse.jetty:jetty-servlet:${jettyDep}"
+  compile "org.eclipse.jetty:jetty-servlets:${jettyDep}"
+  compile 'org.mybatis:mybatis:3.3.0'
+  compile 'org.mybatis:mybatis-guice:3.6'
+  compile 'org.quartz-scheduler:quartz:2.2.1'
   compile "org.slf4j:slf4j-jdk14:${slf4jRev}"
-  compile 'com.twitter.common.logging:log4j:0.0.4'
-  compile 'com.twitter.common.webassets:bootstrap:0.0.2'
-  compile 'com.twitter.common.webassets:jquery:0.0.2'
-  compile 'com.twitter.common.zookeeper.guice:client-flagged:0.0.3'
-  compile 'com.twitter.common.zookeeper.guice:client:0.0.3'
-  compile 'com.twitter.common.zookeeper:candidate:0.0.56'
-  compile 'com.twitter.common.zookeeper:client:0.0.46'
-  compile 'com.twitter.common.zookeeper:group:0.0.59'
-  compile 'com.twitter.common.zookeeper:server-set:1.0.64'
-  compile 'com.twitter.common.zookeeper:singleton-service:0.0.76'
-  compile 'com.twitter.common:application-http:0.0.53'
-  compile 'com.twitter.common:application-module-applauncher:0.0.46'
-  compile 'com.twitter.common:application-module-http:0.0.56'
-  compile 'com.twitter.common:application-module-lifecycle:0.0.43'
-  compile 'com.twitter.common:application-module-log:0.0.51'
-  compile 'com.twitter.common:application-module-stats:0.0.41'
-  compile 'com.twitter.common:application:0.0.68'
-  compile 'com.twitter.common:args:0.2.1'
-  compile 'com.twitter.common:base:0.0.75'
-  compile 'com.twitter.common:collections:0.0.60'
-  compile 'com.twitter.common:dynamic-host-set:0.0.37'
-  compile 'com.twitter.common:inject-timed:0.0.9'
-  compile 'com.twitter.common:inject:0.0.31'
-  compile 'com.twitter.common:io:0.0.46'
-  compile 'com.twitter.common:jdk-logging:0.0.37'
-  compile 'com.twitter.common:logging:0.0.55'
-  compile 'com.twitter.common:net-http-filters:0.0.3'
-  compile 'com.twitter.common:net-util:0.0.68'
-  compile 'com.twitter.common:quantity:0.0.57'
-  compile 'com.twitter.common:stats:0.0.85'
-  compile 'com.twitter.common:testing-easymock:0.0.2'
-  compile 'com.twitter.common:thrift:0.0.63'
-  compile 'com.twitter.common:util-executor-service-shutdown:0.0.43'
-  compile 'com.twitter.common:util-system-mocks:0.0.58'
-  compile 'com.twitter.common:util-templating:0.0.19'
-  compile 'com.twitter.common:util-testing:0.0.7'
-  compile 'com.twitter.common:util:0.0.87'
-  compile 'com.twitter.common:zookeeper-testing:0.0.40'
+  compile 'com.twitter.common.logging:log4j:0.0.7'
+  compile 'com.twitter.common.zookeeper.guice:client-flagged:0.0.5'
+  compile 'com.twitter.common.zookeeper.guice:client:0.0.5'
+  compile 'com.twitter.common.zookeeper:candidate:0.0.64'
+  compile 'com.twitter.common.zookeeper:client:0.0.56'
+  compile 'com.twitter.common.zookeeper:group:0.0.69'
+  compile 'com.twitter.common.zookeeper:server-set:1.0.74'
+  compile 'com.twitter.common.zookeeper:singleton-service:0.0.85'
+  compile 'com.twitter.common:application-module-applauncher:0.0.51'
+  compile 'com.twitter.common:application-module-lifecycle:0.0.48'
+  compile 'com.twitter.common:application-module-stats:0.0.44'
+  compile 'com.twitter.common:application:0.0.73'
+  compile 'com.twitter.common:args:0.2.9'
+  compile 'com.twitter.common:base:0.0.87'
+  compile 'com.twitter.common:collections:0.0.74'
+  compile 'com.twitter.common:dynamic-host-set:0.0.44'
+  compile 'com.twitter.common:inject-timed:0.0.11'
+  compile 'com.twitter.common:inject:0.0.35'
+  compile 'com.twitter.common:jdk-logging:0.0.44'
+  compile 'com.twitter.common:logging:0.0.61'
+  compile 'com.twitter.common:net-http-handlers-time-series:0.0.51'
+  compile 'com.twitter.common:net-util:0.0.80'
+  compile 'com.twitter.common:quantity:0.0.71'
+  compile 'com.twitter.common:stats:0.0.91'
+  compile 'com.twitter.common:thrift:0.0.68'
+  compile 'com.twitter.common:util-executor-service-shutdown:0.0.49'
+  compile 'com.twitter.common:util-templating:0.0.25'
+  compile 'com.twitter.common:util-testing:0.0.10'
+  compile 'com.twitter.common:util:0.0.94'
 
+  testCompile "com.sun.jersey:jersey-client:${jerseyRev}"
+  testCompile 'com.twitter.common:testing-easymock:0.0.4'
+  testCompile 'com.twitter.common:util-system-mocks:0.0.72'
+  testCompile 'com.twitter.common:zookeeper-testing:0.0.45'
   testCompile "junit:junit:${junitRev}"
 
-  generatedCompile guavaDep
-  generatedCompile thriftLib
-
-  checkstyle 'com.puppycrawl.tools:checkstyle:5.6'
-
   configurations.compile {
-    resolutionStrategy {
-      failOnVersionConflict()
+  }
+}
 
-      def forceDepVersions = [
-        // Force versions based on the dependencies we use from above
-        'org.slf4j:slf4j-api' : slf4jRev,
-        'log4j:log4j' : log4jRev,
-        'org.apache.thrift:libthrift' : libthriftRev,
-        'junit:junit' : junitRev,
-        // Force versions based on inter-dependency collisions
-        'org.hamcrest:hamcrest-core' : '1.3',
-      ]
-
-      force forceDepVersions.collect { dep, ver -> "$dep:$ver" }
-    }
+// For normal developer builds, avoid running the often-time-consuming code quality checks.
+// Jenkins will always run these, and developers are encouraged to run these before posting diffs
+// and pushing to master.
+def runCodeQuality = project.hasProperty('q')
+def codeQualityTasks = [
+    Checkstyle,
+    FindBugs,
+    nl.javadude.gradle.plugins.license.License,
+    Pmd
+]
+codeQualityTasks.each {
+  tasks.withType(it) {
+    enabled = runCodeQuality
   }
 }
 
 checkstyle {
-  sourceSets = [ sourceSets.main , sourceSets.test]
+  sourceSets = [sourceSets.main , sourceSets.test, sourceSets.jmh]
+  toolVersion = '6.7'
 }
 
-def thriftBinary = 'build-support/thrift/thrift-0.9.1/compiler/cpp/thrift'
-
-task bootstrapThrift {
-  inputs.file file(thriftBinary)
-  outputs.dir file(thriftBinary)
-  exec {
-    executable = 'make'
-    args = ['-C', 'build-support/thrift']
+tasks.withType(FindBugs) {
+  reports {
+    xml.enabled = false
+    html.enabled = true
   }
+  maxHeapSize = '1g'
+  excludeFilter = rootProject.file('config/findbugs/excludeFilter.xml')
 }
 
-task generateSources(dependsOn: 'bootstrapThrift') {
-  ext.inputFiles = fileTree(dir: 'src/main/thrift').matching { include '**/*.thrift' }
-  ext.outputDir = file(generatedDir)
-  inputs.file inputFiles
-  outputs.dir outputDir
-  doFirst {
-    outputDir.exists() || outputDir.mkdirs()
-    inputFiles.each { File file ->
-      exec {
-        executable = thriftBinary
-        args = ['--gen', 'java:hashcode', '--gen', 'js', '-o', outputDir, file]
-      }
-    }
-    // TODO(wfarner): Change codegen tool to generate for all structs in a thrift file.
-    def iStructs = ['JobConfiguration',
-                    'JobStats',
-                    'Lock',
-                    'ResourceAggregate',
-                    'ScheduledTask',
-                    'ServerInfo']
-    iStructs.each {
-      def structName = it
-      exec {
-        executable = 'python'
-        args = ['src/main/python/apache/aurora/tools/java/thrift_wrapper_codegen.py',
-                'src/main/thrift/org/apache/aurora/gen/api.thrift',
-                structName,
-                generatedJavaDir]
-      }
-    }
-  }
+pmd {
+  // Avoiding gradle's upgrade of PMD since there have been regressions in some rules post-5.1.1.
+  // For example, UnusedPrivateMethod raises some obvious false positives.
+  toolVersion = '5.1.1'
+
+  sourceSets = [sourceSets.main]
+  // PMD rule set names match XML files stored in the PMD jar.  For example, with 5.11 you can
+  // see all the rules included with:
+  //   $ find ~/.gradle -name pmd-5.1.1.jar | xargs zipinfo -1 | egrep java/.*.xml | head -n 5
+  //    rulesets/java/clone.xml
+  //    rulesets/java/basic.xml
+  //    rulesets/java/strings.xml
+  //    rulesets/java/sunsecure.xml
+  //    rulesets/java/codesize.xml
+  // The format is straightforward: 'java-basic' refers to rulesets/java/basic.xml.
+  ruleSets = [
+      'java-braces',
+      'java-junit',
+      'java-typeresolution',
+      'java-unnecessary',
+      'java-unusedcode']
+  ruleSetFiles = fileTree('config/pmd/')
+  consoleOutput = true
 }
 
-compileGeneratedJava {
-  dependsOn generateSources
-}
 
-compileJava.source sourceSets.main.java
+/**
+ * There is a jshint target recommended in the README for gradle-js-plugin
+ * but it does not work. This workaround from here:
+ * https://github.com/eriwen/gradle-js-plugin/issues/73
+ */
+task jsHint(type:com.eriwen.gradle.js.tasks.JsHintTask) {
+  source = fileTree("src/main/resources/$httpAssetsPath/js/")
+  dest file("${buildDir}/jshint.out")
+  // Set this to false once JS code complies with JSHint.
+  ignoreExitCode false
+  outputToStdOut true
+  jshint.options = [
+    // See: http://www.jshint.com/docs/options/ for explanation.
+    browser: true,
+    camelcase: true,
+    curly: true,
+    eqeqeq: true,
+    indent: 2,
+    maxlen: 100,
+    quotmark: true,
+    trailing: true,
+    undef: true,
+    unused: 'vars',
+    white: true
+  ]
+  jshint.predef = [
+    '_': true,
+    'angular': true,
+    'moment': true,
+    'Thrift': true
+  ]
+}
+tasks.checkstyleMain.dependsOn(jsHint)
 
 tasks.withType(Test) {
   maxParallelForks = Runtime.runtime.availableProcessors()
 }
 
-ideaProject.dependsOn generateSources
-
 idea {
-  module {
-    def codegenDirs = [file(generatedJavaDir), file(generatedJSDir)]
-
-    // These directories must exist, else the plugin omits them from the
-    // generated project. Since this is executed during the configuration
-    // lifecycle phase, dependency tasks have not yet run and created
-    // the directories themselves.
-    codegenDirs.each { File codegenDir ->
-      codegenDir.mkdirs()
-    }
-
-    // By default, the idea module [1] excludes are set to
-    // [project.buildDir, project.file('.gradle')]
-    // This has the side-effect of also excluding our generated sources [2].  Due to the way
-    // directory exclusion works in idea, you can't exclude a directory and include a child of that
-    // directory.  Clearing the excludes seems to have no ill side-effects, making it preferable to
-    // other possible approaches.
-    //
-    // [1] http://www.gradle.org/docs/current/dsl/org.gradle.plugins.ide.idea.model.IdeaModule.html
-    // [2] http://issues.gradle.org/browse/GRADLE-1174
-    excludeDirs = []
-    sourceDirs += codegenDirs
+  project {
+    vcs = 'Git'
   }
 }
 
@@ -322,58 +441,70 @@ idea {
 applicationName = 'aurora-scheduler'
 mainClassName = 'org.apache.aurora.scheduler.app.SchedulerMain'
 
-// Run a local scheduler with a local log file and fake jobs
-run {
-  classpath += sourceSets.generated.output
-  args = [
-    '-thermos_executor_path=/dev/null',
-    '-gc_executor_path=/dev/null',
-    '-http_port=8081',
-    '-thrift_port=8082',
-    '-zk_in_proc=true',
-    '-zk_endpoints=localhost:0',
-    '-serverset_path=/twitter/service/mesos/local/scheduler',
-    '-mesos_master_address=local',
-    '-cluster_name=local',
-    '-log_dir=/tmp',
-    '-backup_dir=/tmp',
-    '-logtostderr',
-    '-vlog=INFO',
-    '-testing_isolated_scheduler=true',
-    '-testing_log_file_path=/tmp/testing_log_file',
-  ]
-}
-
-
-jettyRun{
-    classpath += sourceSets.generated.output
-}
-
-tasks.withType(nl.javadude.gradle.plugins.license.License).each { licenseTask ->
-  licenseTask.setSource files("$projectDir/src/main/java", "$projectDir/src/test/java")
+// TODO(ksweeney): Configure this to scan resources as well.
+tasks.withType(nl.javadude.gradle.plugins.license.License).each {
+  it.source = files("$projectDir/src/main/java", "$projectDir/src/test/java")
 }
 
 license {
   header rootProject.file('config/checkstyle/apache.header')
   strictCheck true
   skipExistingHeaders true
-  ext.year = Calendar.getInstance().get(Calendar.YEAR)
 }
 
+def reportPath = "$buildDir/reports/jacoco/test"
 jacocoTestReport {
   group = "Reporting"
   description = "Generate Jacoco coverage reports after running tests."
-  additionalSourceDirs = files(sourceSets.main.allJava.srcDirs)
+
+  sourceDirectories = sourceSets.main.java
+  classDirectories = files("$buildDir/classes/main")
+  reports {
+    xml.enabled true
+  }
   doLast {
-    println "Coverage report generated: file:///$buildDir/reports/jacoco/test/html/index.html"
+    println "Coverage report generated: file://$reportPath/html/index.html"
   }
 }
-
 test.finalizedBy jacocoTestReport
 
-task FlagSchemaChanges(type: Test) {
-  exec {
-    executable = 'bash'
-    args = ['src/test/sh/org/apache/aurora/verify_thrift_checksum.sh']
+task analyzeReport(type: CoverageReportCheck) {
+  coverageReportFile = "$reportPath/jacocoTestReport.xml"
+  minInstructionCoverage = 0.89
+  minBranchCoverage = 0.835
+  legacyClassesWithoutCoverage = file('config/legacy_untested_classes.txt').readLines()
+}
+jacocoTestReport.finalizedBy analyzeReport
+
+def jmhHumanOutputPath = "$buildDir/reports/jmh/human.txt"
+jmh {
+  // Run specific benchmarks by passing -Pbenchmarks='<regexp' on the command line.  For example
+  // ./gradlew jmh -Pbenchmarks='ThriftApi.*'
+  if (project.hasProperty('benchmarks')) {
+    include = project.getProperty('benchmarks')
+  }
+  jmhVersion = '1.7.1'
+  jvmArgsPrepend = '-Xmx3g'
+  humanOutputFile = project.file("$jmhHumanOutputPath")
+  resultsFile = project.file("$buildDir/reports/jmh/results.txt")
+}
+tasks.getByName('jmh').doLast() {
+  println "Benchmark report generated: file://$jmhHumanOutputPath"
+}
+
+run {
+  main = 'org.apache.aurora.scheduler.app.local.LocalSchedulerMain'
+  classpath += sourceSets.test.output
+}
+
+startScripts {
+  def environmentClasspathPrefix = System.env.CLASSPATH_PREFIX
+
+  if (!environmentClasspathPrefix?.trim()) {
+    return
+  }
+
+  doLast {
+    unixScript.text = unixScript.text.replace('CLASSPATH=', "CLASSPATH=${environmentClasspathPrefix}:")
   }
 }

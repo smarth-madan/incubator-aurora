@@ -1,6 +1,4 @@
 /**
- * Copyright 2014 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,9 +13,9 @@
  */
 package org.apache.aurora.scheduler.state;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
+
 import com.google.common.base.Optional;
-import com.google.common.base.Preconditions;
 
 import org.apache.aurora.gen.ScheduleStatus;
 
@@ -31,20 +29,11 @@ class SideEffect {
 
   SideEffect(Action action, Optional<ScheduleStatus> nextState) {
     this.action = action;
-    if (action == Action.STATE_CHANGE) {
-      Preconditions.checkArgument(
-          nextState.isPresent(),
-          "A next state must be provided for a state change action.");
-    }
     this.nextState = nextState;
   }
 
   public Action getAction() {
     return action;
-  }
-
-  public Optional<ScheduleStatus> getNextState() {
-    return nextState;
   }
 
   @Override
@@ -54,13 +43,13 @@ class SideEffect {
     }
 
     SideEffect other = (SideEffect) o;
-    return Objects.equal(action, other.action)
-        && Objects.equal(nextState, other.nextState);
+    return Objects.equals(action, other.action)
+        && Objects.equals(nextState, other.nextState);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hashCode(action, nextState);
+    return Objects.hash(action, nextState);
   }
 
   @Override
@@ -96,11 +85,6 @@ class SideEffect {
     /**
      * Increment the failure count for this task.
      */
-    INCREMENT_FAILURES,
-
-    /**
-     * Perform an additional state change on the task.
-     */
-    STATE_CHANGE
+    INCREMENT_FAILURES
   }
 }

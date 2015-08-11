@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,139 +14,59 @@
 
 import os
 
-python_library(
-  name = 'thermos_task_runner',
-  sources = ['thermos_task_runner.py'],
-  dependencies = [
-    pants('3rdparty/python:twitter.common.dirutil'),
-    pants('3rdparty/python:twitter.common.log'),
-    pants('3rdparty/python:twitter.common.quantity'),
-    pants('src/main/python/apache/thermos/common'),
-    pants('src/main/python/apache/thermos/config:schema'),
-    pants('src/main/python/apache/thermos/core'),
-    pants('src/main/python/apache/thermos/monitoring:monitor'),
-    pants('src/main/python/apache/aurora/common:http_signaler'),
-    pants('src/main/python/apache/aurora/executor/common:status_checker'),
-    pants('src/main/python/apache/aurora/executor/common:task_info'),
-    pants('src/main/python/apache/aurora/executor/common:task_runner'),
-  ]
-)
 
 python_library(
-  name = 'executor_detector',
-  sources = ['executor_detector.py'],
+  name = '_executor',
+  sources = rglobs('*.py'),
   dependencies = [
-    pants('3rdparty/python:twitter.common.string'),
-  ]
-)
-
-python_library(
-  name = 'executor_vars',
-  sources = ['executor_vars.py'],
-  dependencies = [
-    pants('3rdparty/python:psutil'),
-    pants('3rdparty/python:twitter.common.exceptions'),
-    pants('3rdparty/python:twitter.common.metrics'),
-    pants('3rdparty/python:twitter.common.python'),
-    pants('3rdparty/python:twitter.common.quantity'),
-    pants('3rdparty/python:twitter.common.string'),
-  ]
-)
-
-python_library(
-  name = 'status_manager',
-  sources = ['status_manager.py'],
-  dependencies = [
-    pants('3rdparty/python:twitter.common.exceptions'),
-    pants('3rdparty/python:twitter.common.log'),
-    pants('3rdparty/python:twitter.common.quantity'),
-    pants('src/main/python/apache/aurora/executor/common:status_checker'),
-  ]
-)
-
-python_library(
-  name = 'executor_base',
-  sources = ['executor_base.py'],
-  dependencies = [
-    pants('3rdparty/python:mesos'),
-    pants('3rdparty/python:twitter.common.log'),
-  ]
-)
-
-python_library(
-  name = 'aurora_executor',
-  sources = ['aurora_executor.py'],
-  dependencies = [
-    pants(':status_manager'),
-    pants(':executor_base'),
-    pants('3rdparty/python:mesos'),
-    pants('3rdparty/python:pystachio'),
-    pants('3rdparty/python:twitter.common.app'),
-    pants('3rdparty/python:twitter.common.concurrent'),
-    pants('3rdparty/python:twitter.common.log'),
-    pants('3rdparty/python:twitter.common.quantity'),
-    pants('src/main/python/apache/aurora/executor/common:kill_manager'),
-    pants('src/main/python/apache/aurora/executor/common:sandbox'),
-    pants('src/main/python/apache/aurora/executor/common:task_info'),
-    pants('src/main/python/apache/aurora/executor/common:task_runner'),
-  ]
-)
-
-python_library(
-  name = 'thermos_runner',
-  sources = ['thermos_runner.py'],
-  dependencies = [
-    pants('3rdparty/python:twitter.common.app'),
-    pants('3rdparty/python:twitter.common.log'),
-    pants('src/main/python/apache/thermos/common:planner'),
-    pants('src/main/python/apache/thermos/config:schema'),
-    pants('src/main/python/apache/thermos/core'),
+    '3rdparty/python:mesos.interface',
+    '3rdparty/python:pex',
+    # To prevent an alpha version of protobuf from being pulled down by pants we
+    # specify protobuf here. See AURORA-1128 for more details.
+    '3rdparty/python:protobuf',
+    '3rdparty/python:psutil',
+    '3rdparty/python:pystachio',
+    '3rdparty/python:twitter.common.app',
+    '3rdparty/python:twitter.common.concurrent',
+    '3rdparty/python:twitter.common.dirutil',
+    '3rdparty/python:twitter.common.exceptions',
+    '3rdparty/python:twitter.common.lang',
+    '3rdparty/python:twitter.common.log',
+    '3rdparty/python:twitter.common.metrics',
+    '3rdparty/python:twitter.common.quantity',
+    '3rdparty/python:twitter.common.string',
+    '3rdparty/python:twitter.common.zookeeper',
+    'api/src/main/thrift/org/apache/aurora/gen',
+    'src/main/python/apache/aurora/common',
+    'src/main/python/apache/aurora/config',
+    'src/main/python/apache/thermos/common',
+    'src/main/python/apache/thermos/config',
+    'src/main/python/apache/thermos/core',
+    'src/main/python/apache/thermos/monitoring',
   ],
 )
 
-python_library(
-  name = 'gc_executor',
-  sources = ['gc_executor.py'],
+python_binary(
+  name = 'thermos_executor',
+  entry_point = 'apache.aurora.executor.bin.thermos_executor_main:proxy_main',
+  always_write_cache = True,
   dependencies = [
-    pants(':executor_detector'),
-    pants(':executor_base'),
-    pants('3rdparty/python:mesos'),
-    pants('3rdparty/python:psutil'),
-    pants('3rdparty/python:twitter.common.collections'),
-    pants('3rdparty/python:twitter.common.exceptions'),
-    pants('3rdparty/python:twitter.common.log'),
-    pants('3rdparty/python:twitter.common.metrics'),
-    pants('3rdparty/python:twitter.common.quantity'),
-    pants('src/main/python/apache/thermos/common:ckpt'),
-    pants('src/main/python/apache/thermos/common:path'),
-    pants('src/main/python/apache/thermos/core:helper'),
-    pants('src/main/python/apache/thermos/core:inspector'),
-    pants('src/main/python/apache/thermos/monitoring:detector'),
-    pants('src/main/python/apache/thermos/monitoring:garbage'),
-    pants('src/main/python/apache/aurora/config:schema'),
-    pants('src/main/python/apache/aurora/executor/common:sandbox'),
-    pants('src/main/thrift/org/apache/aurora/gen:py-thrift'),
-    pants('src/main/thrift/org/apache/thermos:py-thrift'),
+    ':_executor',
+    # TODO(ksweeney): This violates the rule that every library export the same deps as its
+    # contained binaries.
+    '3rdparty/python:mesos.native',
   ]
 )
 
 python_library(
-  name = 'executor-packaged',
+  name = 'executor',
   dependencies = [
-    # Covering dependencies
-    pants('src/main/python/apache/aurora/common'),
-    pants('src/main/python/apache/aurora/config'),
-    pants('src/main/python/apache/thermos/common'),
-    pants('src/main/python/apache/thermos/config'),
-    pants('src/main/python/apache/thermos/core'),
-    pants('src/main/python/apache/thermos/monitoring'),
+    ':_executor',
   ],
   provides = setup_py(
     name = 'apache.aurora.executor',
     version = open(os.path.join(get_buildroot(), '.auroraversion')).read().strip().upper(),
   ).with_binaries(
-    gc_executor = pants('src/main/python/apache/aurora/executor/bin:gc_executor'),
-    thermos_executor = pants('src/main/python/apache/aurora/executor/bin:thermos_executor'),
-    thermos_runner = pants('src/main/python/apache/aurora/executor/bin:thermos_runner'),
+    thermos_executor = ':thermos_executor',
   )
 )

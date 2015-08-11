@@ -1,4 +1,18 @@
-<%doc>
+<!--
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+ -->
+
+ <%doc>
 Template arguments:
   task_id
   process {
@@ -75,14 +89,13 @@ ${escape(process["cmdline"])}
      <table class="table table-bordered table-condensed table-striped" style="empty-cells:show;">
      <thead>
        <tr>
-         <th colspan=2> </th>
+         <th colspan=3> </th>
          <th colspan=2> time </th>
          <th colspan=2> logs </th>
        </tr>
 
        <tr>
-         <th> run </th>
-         <th> status </th>
+         <th> run </th> <th> status </th> <th>return code</th>
          <th> started </th> <th> finished </th>
          <th> stdout </th> <th> stderr </th>
        </tr>
@@ -93,6 +106,7 @@ ${escape(process["cmdline"])}
        <tr>
          <td> ${run} </td>
          <td> ${process_dict["state"]} </td>
+         <td> ${process_dict["return_code"] if "return_code" in process_dict else ""} </td>
          <td> ${pretty_time(process_dict["start_time"]) if "start_time" in process_dict else ""} </td>
          <td> ${pretty_time(process_dict["stop_time"]) if "stop_time" in process_dict else ""} </td>
          <td> <a href="/logs/${task_id}/${process["name"]}/${run}/stdout">stdout</a> </td>

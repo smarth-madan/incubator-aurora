@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -19,7 +17,9 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.aurora.gen.Constraint;
+import org.apache.aurora.gen.Container;
 import org.apache.aurora.gen.CronCollisionPolicy;
+import org.apache.aurora.gen.DockerContainer;
 import org.apache.aurora.gen.ExecutorConfig;
 import org.apache.aurora.gen.Identity;
 import org.apache.aurora.gen.JobConfiguration;
@@ -28,30 +28,30 @@ import org.apache.aurora.gen.LimitConstraint;
 import org.apache.aurora.gen.TaskConfig;
 import org.apache.aurora.gen.TaskConstraint;
 import org.apache.aurora.gen.ValueConstraint;
+import org.apache.aurora.scheduler.storage.entities.ITaskConfig;
 import org.junit.Test;
 
-import static org.apache.aurora.gen.apiConstants.DEFAULT_ENVIRONMENT;
 import static org.apache.aurora.gen.test.testConstants.INVALID_IDENTIFIERS;
 import static org.apache.aurora.gen.test.testConstants.VALID_IDENTIFIERS;
+import static org.apache.aurora.scheduler.configuration.ConfigurationManager.DEDICATED_ATTRIBUTE;
 import static org.apache.aurora.scheduler.configuration.ConfigurationManager.isGoodIdentifier;
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 // TODO(kevints): Improve test coverage for this class.
 public class ConfigurationManagerTest {
   private static final JobConfiguration UNSANITIZED_JOB_CONFIGURATION = new JobConfiguration()
-      .setKey(new JobKey("owner-role", DEFAULT_ENVIRONMENT, "email_stats"))
+      .setKey(new JobKey("owner-role", "devel", "email_stats"))
       .setCronSchedule("0 2 * * *")
       .setCronCollisionPolicy(CronCollisionPolicy.KILL_EXISTING)
       .setInstanceCount(1)
       .setTaskConfig(
           new TaskConfig()
               .setIsService(false)
-              .setTaskLinks(ImmutableMap.<String, String>of())
+              .setTaskLinks(ImmutableMap.of())
               .setExecutorConfig(new ExecutorConfig("aurora", "config"))
-              .setEnvironment(DEFAULT_ENVIRONMENT)
-              .setRequestedPorts(ImmutableSet.<String>of())
+              .setEnvironment("devel")
+              .setRequestedPorts(ImmutableSet.of())
               .setJobName(null)
               .setPriority(0)
               .setOwner(null)
@@ -73,11 +73,24 @@ public class ConfigurationManagerTest {
                       new Constraint()
                           .setName("host")
                           .setConstraint(TaskConstraint.limit(new LimitConstraint()
-                              .setLimit(1))))))
-      .setOwner(new Identity()
-          .setRole("owner-role")
-          .setUser("owner-user"));
-
+                              .setLimit(1))),
+                      new Constraint()
+                          .setName(DEDICATED_ATTRIBUTE)
+                          .setConstraint(TaskConstraint.value(new ValueConstraint(
+                              false, ImmutableSet.of("foo"))))))
+              .setOwner(new Identity()
+                  .setRole("owner-role")
+                  .setUser("owner-user")));
+  private static final TaskConfig CONFIG_WITH_CONTAINER = ITaskConfig.build(new TaskConfig()
+      .setJobName("container-test")
+      .setEnvironment("devel")
+      .setExecutorConfig(new ExecutorConfig())
+      .setOwner(new Identity("role", "user"))
+      .setNumCpus(1)
+      .setRamMb(1)
+      .setDiskMb(1)
+      .setContainer(Container.docker(new DockerContainer("testimage"))))
+      .newBuilder();
 
   @Test
   public void testIsGoodIdentifier() {
@@ -95,6 +108,13 @@ public class ConfigurationManagerTest {
 
     ConfigurationManager.applyDefaultsIfUnset(copy);
     assertTrue(copy.isSetKey());
-    assertEquals(DEFAULT_ENVIRONMENT, copy.getKey().getEnvironment());
+  }
+
+  @Test(expected = ConfigurationManager.TaskDescriptionException.class)
+  public void testBadContainerConfig() throws ConfigurationManager.TaskDescriptionException {
+    TaskConfig taskConfig = CONFIG_WITH_CONTAINER.deepCopy();
+    taskConfig.getContainer().getDocker().setImage(null);
+
+    ConfigurationManager.validateAndPopulate(ITaskConfig.build(taskConfig));
   }
 }

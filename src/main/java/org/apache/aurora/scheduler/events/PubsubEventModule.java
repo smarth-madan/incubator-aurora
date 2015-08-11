@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,96 +14,181 @@
 package org.apache.aurora.scheduler.events;
 
 import java.util.Set;
+import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.eventbus.AsyncEventBus;
 import com.google.common.eventbus.DeadEvent;
 import com.google.common.eventbus.EventBus;
 import com.google.common.eventbus.Subscribe;
+import com.google.common.eventbus.SubscriberExceptionContext;
+import com.google.common.eventbus.SubscriberExceptionHandler;
+import com.google.common.util.concurrent.AbstractIdleService;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.google.inject.AbstractModule;
 import com.google.inject.Binder;
+import com.google.inject.Provides;
+import com.google.inject.binder.LinkedBindingBuilder;
 import com.google.inject.multibindings.Multibinder;
-import com.twitter.common.application.modules.LifecycleModule;
-import com.twitter.common.base.Command;
+import com.twitter.common.args.Arg;
+import com.twitter.common.args.CmdLine;
+import com.twitter.common.args.constraints.Positive;
+import com.twitter.common.stats.StatsProvider;
 
+import org.apache.aurora.scheduler.SchedulerServicesModule;
+import org.apache.aurora.scheduler.base.AsyncUtil;
 import org.apache.aurora.scheduler.events.NotifyingSchedulingFilter.NotifyDelegate;
 import org.apache.aurora.scheduler.events.PubsubEvent.EventSubscriber;
 import org.apache.aurora.scheduler.filter.SchedulingFilter;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
 
 /**
  * Binding module for plumbing event notifications.
  */
 public final class PubsubEventModule extends AbstractModule {
 
-  private static final Logger LOG = Logger.getLogger(PubsubEventModule.class.getName());
+  private final boolean async;
+  private final Logger log;
 
-  private PubsubEventModule() {
-    // Must be constructed through factory.
+  @VisibleForTesting
+  static final String PUBSUB_EXECUTOR_QUEUE_GAUGE = "pubsub_executor_queue_size";
+
+  @VisibleForTesting
+  static final String EXCEPTIONS_STAT = "event_bus_exceptions";
+
+  @Positive
+  @CmdLine(name = "max_async_event_bus_threads",
+      help = "Maximum number of concurrent threads to allow for the async event processing bus.")
+  private static final Arg<Integer> MAX_ASYNC_EVENT_BUS_THREADS = Arg.create(4);
+
+  @VisibleForTesting
+  PubsubEventModule(boolean async, Logger log) {
+    this.log = requireNonNull(log);
+    this.async = requireNonNull(async);
+  }
+
+  // TODO(wfarner): Remove the async argument and accept an Executor instead.
+  public PubsubEventModule(boolean async) {
+    this(async, Logger.getLogger(PubsubEventModule.class.getName()));
   }
 
   @VisibleForTesting
-  public static void installForTest(Binder binder) {
-    binder.install(new PubsubEventModule());
-  }
+  static final String DEAD_EVENT_MESSAGE = "Captured dead event %s";
 
   @Override
   protected void configure() {
-    final EventBus eventBus = new EventBus("TaskEvents");
-    eventBus.register(new Object() {
-      @Subscribe public void logDeadEvent(DeadEvent event) {
-        LOG.warning("Captured dead event " + event.getEvent());
-      }
-    });
+    // Ensure at least an empty binding is present.
+    getSubscriberBinder(binder());
+    // TODO(ksweeney): Would this be better as a scheduler active service?
+    SchedulerServicesModule.addAppStartupServiceBinding(binder()).to(RegisterSubscribers.class);
+  }
 
-    bind(EventBus.class).toInstance(eventBus);
+  @Provides
+  @Singleton
+  EventBus provideEventBus(StatsProvider statsProvider) {
+    Executor executor;
+    if (async) {
+      LinkedBlockingQueue<Runnable> executorQueue = new LinkedBlockingQueue<>();
+      statsProvider.makeGauge(PUBSUB_EXECUTOR_QUEUE_GAUGE, executorQueue::size);
 
-    EventSink eventSink = new EventSink() {
+      executor = AsyncUtil.loggingExecutor(
+          MAX_ASYNC_EVENT_BUS_THREADS.get(),
+          MAX_ASYNC_EVENT_BUS_THREADS.get(),
+          executorQueue,
+          "AsyncTaskEvents-%d",
+          log);
+    } else {
+      executor = MoreExecutors.sameThreadExecutor();
+    }
+
+    final AtomicLong subscriberExceptions = statsProvider.makeCounter(EXCEPTIONS_STAT);
+    EventBus eventBus = new AsyncEventBus(
+        executor,
+        new SubscriberExceptionHandler() {
+          @Override
+          public void handleException(Throwable exception, SubscriberExceptionContext context) {
+            subscriberExceptions.incrementAndGet();
+            log.log(
+                Level.SEVERE,
+                "Failed to dispatch event to " + context.getSubscriberMethod() + ": " + exception,
+                exception);
+          }
+        }
+    );
+
+    eventBus.register(new DeadEventHandler());
+    return eventBus;
+  }
+
+  @Provides
+  @Singleton
+  EventSink provideEventSink(EventBus eventBus) {
+    return new EventSink() {
       @Override
       public void post(PubsubEvent event) {
         eventBus.post(event);
       }
     };
-    bind(EventSink.class).toInstance(eventSink);
-
-    // Ensure at least an empty binding is present.
-    getSubscriberBinder(binder());
-    LifecycleModule.bindStartupAction(binder(), RegisterSubscribers.class);
   }
 
-  static class RegisterSubscribers implements Command {
+  private class DeadEventHandler {
+    @Subscribe
+    public void logDeadEvent(DeadEvent event) {
+      log.warning(String.format(DEAD_EVENT_MESSAGE, event.getEvent()));
+    }
+  }
+
+  static class RegisterSubscribers extends AbstractIdleService {
     private final EventBus eventBus;
     private final Set<EventSubscriber> subscribers;
 
     @Inject
     RegisterSubscribers(EventBus eventBus, Set<EventSubscriber> subscribers) {
-      this.eventBus = checkNotNull(eventBus);
-      this.subscribers = checkNotNull(subscribers);
+      this.eventBus = requireNonNull(eventBus);
+      this.subscribers = requireNonNull(subscribers);
     }
 
     @Override
-    public void execute() {
+    protected void startUp() {
       for (EventSubscriber subscriber : subscribers) {
         eventBus.register(subscriber);
       }
     }
+
+    @Override
+    protected void shutDown() {
+      // Nothing to do - await VM shutdown.
+    }
+  }
+
+  /**
+   * Gets a binding builder that must be used to wire up the scheduling filter implementation
+   * that backs the delegating scheduling filter that fires pubsub events.
+   *
+   * @param binder Binder to create a binding against.
+   * @return A linked binding builder that may be used to wire up the scheduling filter.
+   */
+  public static LinkedBindingBuilder<SchedulingFilter> bindSchedulingFilterDelegate(Binder binder) {
+    binder.bind(SchedulingFilter.class).to(NotifyingSchedulingFilter.class);
+    binder.bind(NotifyingSchedulingFilter.class).in(Singleton.class);
+    return binder.bind(SchedulingFilter.class).annotatedWith(NotifyDelegate.class);
   }
 
   /**
    * Binds a task event module.
    *
    * @param binder Binder to bind against.
-   * @param filterClass Delegate scheduling filter implementation class.
    */
-  public static void bind(Binder binder, final Class<? extends SchedulingFilter> filterClass) {
-    binder.bind(SchedulingFilter.class).annotatedWith(NotifyDelegate.class).to(filterClass);
-    binder.bind(SchedulingFilter.class).to(NotifyingSchedulingFilter.class);
-    binder.bind(NotifyingSchedulingFilter.class).in(Singleton.class);
-    binder.install(new PubsubEventModule());
+  public static void bind(Binder binder) {
+    binder.install(new PubsubEventModule(true));
   }
 
   private static Multibinder<EventSubscriber> getSubscriberBinder(Binder binder) {

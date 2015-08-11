@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -18,16 +16,18 @@ package org.apache.aurora.scheduler.stats;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import javax.inject.Inject;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
+import com.google.common.collect.FluentIterable;
 import com.google.common.collect.Iterables;
 
 import org.apache.aurora.scheduler.base.Query;
@@ -48,14 +48,22 @@ public class ResourceCounter {
 
   @Inject
   ResourceCounter(Storage storage) {
-    this.storage = Preconditions.checkNotNull(storage);
+    this.storage = Objects.requireNonNull(storage);
   }
 
   private Iterable<ITaskConfig> getTasks(Query.Builder query) throws StorageException {
     return Iterables.transform(
-        Storage.Util.consistentFetchTasks(storage, query),
-        Tasks.SCHEDULED_TO_INFO);
+        Storage.Util.fetchTasks(storage, query),
+        Tasks::getConfig);
   }
+
+  private static final Function<MetricType, GlobalMetric> TO_GLOBAL_METRIC =
+      new Function<MetricType, GlobalMetric>() {
+        @Override
+        public GlobalMetric apply(MetricType type) {
+          return new GlobalMetric(type);
+        }
+      };
 
   /**
    * Computes totals for each of the {@link MetricType}s.
@@ -64,11 +72,9 @@ public class ResourceCounter {
    * @throws StorageException if there was a problem fetching tasks from storage.
    */
   public List<GlobalMetric> computeConsumptionTotals() throws StorageException {
-    List<GlobalMetric> counts = Arrays.asList(
-        new GlobalMetric(MetricType.TOTAL_CONSUMED),
-        new GlobalMetric(MetricType.DEDICATED_CONSUMED),
-        new GlobalMetric(MetricType.QUOTA_CONSUMED),
-        new GlobalMetric(MetricType.FREE_POOL_CONSUMED));
+    List<GlobalMetric> counts = FluentIterable.from(Arrays.asList(MetricType.values()))
+        .transform(TO_GLOBAL_METRIC)
+        .toList();
 
     for (ITaskConfig task : getTasks(Query.unscoped().active())) {
       for (GlobalMetric count : counts) {
@@ -85,7 +91,7 @@ public class ResourceCounter {
    * @throws StorageException if there was a problem fetching quotas from storage.
    */
   public Metric computeQuotaAllocationTotals() throws StorageException {
-    return storage.weaklyConsistentRead(new Work.Quiet<Metric>() {
+    return storage.read(new Work.Quiet<Metric>() {
       @Override
       public Metric apply(StoreProvider storeProvider) {
         Metric allocation = new Metric();
@@ -126,11 +132,11 @@ public class ResourceCounter {
   }
 
   public enum MetricType {
-    TOTAL_CONSUMED(Predicates.<ITaskConfig>alwaysTrue()),
+    TOTAL_CONSUMED(Predicates.alwaysTrue()),
     DEDICATED_CONSUMED(new Predicate<ITaskConfig>() {
       @Override
       public boolean apply(ITaskConfig task) {
-        return ConfigurationManager.isDedicated(task);
+        return ConfigurationManager.isDedicated(task.getConstraints());
       }
     }),
     QUOTA_CONSUMED(new Predicate<ITaskConfig>() {
@@ -142,7 +148,7 @@ public class ResourceCounter {
     FREE_POOL_CONSUMED(new Predicate<ITaskConfig>() {
       @Override
       public boolean apply(ITaskConfig task) {
-        return !ConfigurationManager.isDedicated(task) && !task.isProduction();
+        return !ConfigurationManager.isDedicated(task.getConstraints()) && !task.isProduction();
       }
     });
 
@@ -157,6 +163,12 @@ public class ResourceCounter {
     public final MetricType type;
 
     public GlobalMetric(MetricType type) {
+      this(type, 0, 0, 0);
+    }
+
+    @VisibleForTesting
+    GlobalMetric(MetricType type, long cpu, long ramMb, long diskMb) {
+      super(cpu, ramMb, diskMb);
       this.type = type;
     }
 
@@ -166,6 +178,22 @@ public class ResourceCounter {
         super.accumulate(task);
       }
     }
+
+    @Override
+    public boolean equals(Object o) {
+      if (!(o instanceof GlobalMetric)) {
+        return false;
+      }
+
+      GlobalMetric other = (GlobalMetric) o;
+      return super.equals(other)
+          && Objects.equals(other.type, this.type);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(super.hashCode(), type);
+    }
   }
 
   public static class Metric {
@@ -174,15 +202,18 @@ public class ResourceCounter {
     private long diskMb = 0;
 
     public Metric() {
-      this.cpu = 0;
-      this.ramMb = 0;
-      this.diskMb = 0;
+      this(0, 0, 0);
     }
 
     public Metric(Metric copy) {
-      this.cpu = copy.cpu;
-      this.ramMb = copy.ramMb;
-      this.diskMb = copy.diskMb;
+      this(copy.cpu, copy.ramMb, copy.diskMb);
+    }
+
+    @VisibleForTesting
+    Metric(long cpu, long ramMb, long diskMb) {
+      this.cpu = cpu;
+      this.ramMb = ramMb;
+      this.diskMb = diskMb;
     }
 
     protected void accumulate(ITaskConfig task) {
@@ -207,6 +238,23 @@ public class ResourceCounter {
 
     public long getDiskGb() {
       return diskMb / 1024;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (!(o instanceof Metric)) {
+        return false;
+      }
+
+      Metric other = (Metric) o;
+      return getCpu() == other.getCpu()
+          && getRamGb() == other.getRamGb()
+          && getDiskGb() == other.getDiskGb();
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(cpu, ramMb, diskMb);
     }
   }
 }

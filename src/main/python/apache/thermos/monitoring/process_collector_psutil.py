@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -19,11 +17,11 @@
 from operator import attrgetter
 from time import time
 
-from .process import ProcessSample
-
-from psutil import Process
-from psutil import NoSuchProcess, AccessDenied, Error as PsutilError
+from psutil import Error as PsutilError
+from psutil import AccessDenied, NoSuchProcess, Process
 from twitter.common import log
+
+from .process import ProcessSample
 
 
 def process_to_sample(process):
@@ -31,12 +29,14 @@ def process_to_sample(process):
   try:
     # the nonblocking get_cpu_percent call is stateful on a particular Process object, and hence
     # >2 consecutive calls are required before it will return a non-zero value
-    rate = process.get_cpu_percent(0.0) / 100.0
-    user, system = process.get_cpu_times()
-    rss, vms = process.get_memory_info()
-    nice = process.nice
-    status = process.status
-    threads = process.get_num_threads()
+    rate = process.cpu_percent(0.0) / 100.0
+    cpu_times = process.cpu_times()
+    user, system = cpu_times.user, cpu_times.system
+    memory_info = process.memory_info()
+    rss, vms = memory_info.rss, memory_info.vms
+    nice = process.nice()
+    status = process.status()
+    threads = process.num_threads()
     return ProcessSample(rate, user, system, rss, vms, nice, status, threads)
   except (AccessDenied, NoSuchProcess) as e:
     log.warning('Error during process sampling [pid=%s]: %s' % (process.pid, e))
@@ -45,11 +45,12 @@ def process_to_sample(process):
 
 class ProcessTreeCollector(object):
   """ Collect resource consumption statistics for a process and its children """
+
   def __init__(self, pid):
     """ Given a pid """
     self._pid = pid
     self._process = None  # psutil.Process
-    self._sampled_tree = {} # pid => ProcessSample
+    self._sampled_tree = {}  # pid => ProcessSample
     self._sample = ProcessSample.empty()
     self._stamp = None
     self._rate = 0.0
@@ -66,8 +67,8 @@ class ProcessTreeCollector(object):
       parent = self._process
       parent_sample = process_to_sample(parent)
       new_samples = dict(
-          (proc.pid, process_to_sample(proc))
-          for proc in parent.get_children(recursive=True)
+          (child.pid, process_to_sample(child))
+          for child in parent.children(recursive=True)
       )
       new_samples[self._pid] = parent_sample
 
@@ -104,4 +105,3 @@ class ProcessTreeCollector(object):
   def procs(self):
     """ Number of active processes in the tree """
     return len(self._sampled_tree)
-

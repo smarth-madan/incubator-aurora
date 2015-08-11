@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,12 +12,11 @@
 # limitations under the License.
 #
 
-from apache.aurora.config.loader import AuroraConfigLoader
+import code
 
 from twitter.common.lang import Compatibility
 
+from apache.aurora.config.loader import AuroraConfigLoader
 
-
-import code
-code.interact('Mesos Config REPL', 
+code.interact('Mesos Config REPL',
     local=Compatibility.exec_function(AuroraConfigLoader.DEFAULT_SCHEMA, globals()))

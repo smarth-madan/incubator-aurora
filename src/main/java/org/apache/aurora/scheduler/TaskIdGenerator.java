@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,11 +13,11 @@
  */
 package org.apache.aurora.scheduler;
 
+import java.util.Objects;
 import java.util.UUID;
 
 import javax.inject.Inject;
 
-import com.google.common.base.Preconditions;
 import com.twitter.common.util.Clock;
 
 import org.apache.aurora.scheduler.storage.entities.ITaskConfig;
@@ -44,7 +42,7 @@ public interface TaskIdGenerator {
 
     @Inject
     TaskIdGeneratorImpl(Clock clock) {
-      this.clock = Preconditions.checkNotNull(clock);
+      this.clock = Objects.requireNonNull(clock);
     }
 
     @Override
@@ -53,11 +51,11 @@ public interface TaskIdGenerator {
       return new StringBuilder()
           .append(clock.nowMillis())               // Allows chronological sorting.
           .append(sep)
-          .append(task.getOwner().getRole())       // Identification and collision prevention.
+          .append(task.getJob().getRole())       // Identification and collision prevention.
           .append(sep)
-          .append(task.getEnvironment())
+          .append(task.getJob().getEnvironment())
           .append(sep)
-          .append(task.getJobName())
+          .append(task.getJob().getName())
           .append(sep)
           .append(instanceId)                      // Collision prevention within job.
           .append(sep)

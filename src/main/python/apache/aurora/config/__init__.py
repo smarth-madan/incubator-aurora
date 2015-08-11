@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -18,16 +16,16 @@ from __future__ import absolute_import
 
 from collections import defaultdict
 
+from pystachio import Empty, Environment, Ref
+
 from apache.aurora.common.aurora_job_key import AuroraJobKey
 from apache.aurora.config.schema.base import MesosContext
-from apache.thermos.config.loader import PortExtractor, ThermosTaskWrapper
-from apache.thermos.config.schema import ThermosContext
+from apache.thermos.config.loader import ThermosTaskWrapper
 
 from .loader import AuroraConfigLoader
 from .port_resolver import PortResolver
-from .thrift import convert as convert_thrift, InvalidConfig as InvalidThriftConfig
-
-from pystachio import Empty, Environment, Ref
+from .thrift import InvalidConfig as InvalidThriftConfig
+from .thrift import convert as convert_thrift
 
 __all__ = ('AuroraConfig', 'PortResolver')
 
@@ -160,9 +158,9 @@ class AuroraConfig(object):
     })
 
   def __init__(self, job):
-    self.validate_job(job)
+    self.validate_job(job)  # first-pass validation that required fields are present
     self._job = self.standard_bindings(job)
-    self._packages = []
+    self._metadata = []
     self.binding_dicts = defaultdict(dict)
     self.hooks = []
 
@@ -173,27 +171,8 @@ class AuroraConfig(object):
 
   def job(self):
     interpolated_job = self._job % self.context()
-
-    # TODO(wickman) Once thermos is onto thrift instead of pystachio, use
-    # %%replacements%% instead.
-    #
-    # Typecheck against the Job, with the following free variables unwrapped at the Task level:
-    #  - a dummy {{mesos.instance}}
-    #  - dummy values for the {{thermos.ports}} context, to allow for their use in task_links
-    env = dict(mesos=Environment(instance=0))
-    if interpolated_job.task_links() is not Empty:
-      try:
-        dummy_ports = dict(
-          (port, 31337) for port in PortExtractor.extract(interpolated_job.task_links()))
-      except PortExtractor.InvalidPorts as err:
-        raise self.InvalidConfig('Invalid port references in task_links! %s' % err)
-      env.update(thermos=ThermosContext(ports=dummy_ports))
-    typecheck = interpolated_job.bind(Environment(env)).check()
-    if not typecheck.ok():
-      raise self.InvalidConfig(typecheck.message())
-    interpolated_job = interpolated_job(task_links=self.task_links())
     try:
-      return convert_thrift(interpolated_job, self._packages, self.ports())
+      return convert_thrift(interpolated_job, self._metadata, self.ports())
     except InvalidThriftConfig as e:
       raise self.InvalidConfig(str(e))
 
@@ -253,32 +232,14 @@ class AuroraConfig(object):
   def has_health_port(self):
     return "health" in ThermosTaskWrapper(self._job.task(), strict=False).ports()
 
-  def task_links(self):
-    # {{mesos.instance}} --> %shard_id%
-    # {{thermos.ports[foo]}} --> %port:foo%
-    task_links = self._job.task_links()
-    if task_links is Empty:
-      return task_links
-    _, uninterp = task_links.interpolate()
-    substitutions = {
-      Ref.from_address('mesos.instance'): '%shard_id%'
-    }
-    port_scope = Ref.from_address('thermos.ports')
-    for ref in uninterp:
-      subscope = port_scope.scoped_to(ref)
-      if subscope:
-        substitutions[ref] = '%%port:%s%%' % subscope.action().value
-    return task_links.bind(substitutions)
-
   def update_config(self):
     return self._job.update_config()
 
-  def add_package(self, package):
-    self._packages.append(package)
+  def health_check_config(self):
+    return self._job.health_check_config()
 
-  # TODO(wickman) Kill package() once MESOS-3191 is in.
-  def package(self):
-    pass
+  def add_metadata(self, key, value):
+    self._metadata.append((key, value))
 
   def is_dedicated(self):
     return self._job.has_constraints() and 'dedicated' in self._job.constraints()

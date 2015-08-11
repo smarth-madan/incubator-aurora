@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -32,6 +30,7 @@ import org.apache.aurora.gen.Attribute;
 import org.apache.aurora.gen.HostAttributes;
 import org.apache.aurora.gen.ScheduleStatus;
 import org.apache.aurora.scheduler.configuration.ConfigurationManager;
+import org.apache.aurora.scheduler.storage.entities.IHostAttributes;
 import org.apache.mesos.Protos;
 import org.apache.mesos.Protos.Offer;
 import org.apache.mesos.Protos.TaskState;
@@ -51,11 +50,13 @@ public final class Conversions {
   private static final Map<TaskState, ScheduleStatus> STATE_TRANSLATION =
       new ImmutableMap.Builder<TaskState, ScheduleStatus>()
           .put(TaskState.TASK_STARTING, ScheduleStatus.STARTING)
+          .put(TaskState.TASK_STAGING, ScheduleStatus.STARTING)
           .put(TaskState.TASK_RUNNING, ScheduleStatus.RUNNING)
           .put(TaskState.TASK_FINISHED, ScheduleStatus.FINISHED)
           .put(TaskState.TASK_FAILED, ScheduleStatus.FAILED)
           .put(TaskState.TASK_KILLED, ScheduleStatus.KILLED)
           .put(TaskState.TASK_LOST, ScheduleStatus.LOST)
+          .put(TaskState.TASK_ERROR, ScheduleStatus.LOST)
           .build();
 
   /**
@@ -81,8 +82,8 @@ public final class Conversions {
   /**
    * Typedef to make anonymous implementation more concise.
    */
-  private abstract static class AttributeConverter
-      implements Function<Entry<String, Collection<Protos.Attribute>>, Attribute> {
+  private interface AttributeConverter
+      extends Function<Entry<String, Collection<Protos.Attribute>>, Attribute> {
   }
 
   private static final Function<Protos.Attribute, String> VALUE_CONVERTER =
@@ -122,18 +123,17 @@ public final class Conversions {
    * @param offer Resource offer.
    * @return Equivalent thrift host attributes.
    */
-  public static HostAttributes getAttributes(Offer offer) {
+  public static IHostAttributes getAttributes(Offer offer) {
     // Group by attribute name.
     Multimap<String, Protos.Attribute> valuesByName =
         Multimaps.index(offer.getAttributesList(), ATTRIBUTE_NAME);
 
-    // TODO(William Farner): Include slave id.
-    return new HostAttributes(
+    return IHostAttributes.build(new HostAttributes(
         offer.getHostname(),
         FluentIterable.from(valuesByName.asMap().entrySet())
             .transform(ATTRIBUTE_CONVERTER)
             .toSet())
-        .setSlaveId(offer.getSlaveId().getValue());
+        .setSlaveId(offer.getSlaveId().getValue()));
   }
 
   /**

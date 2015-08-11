@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,9 +13,8 @@
  */
 package org.apache.aurora.scheduler.storage;
 
+import java.util.Optional;
 import java.util.Set;
-
-import com.google.common.base.Optional;
 
 import org.apache.aurora.scheduler.storage.entities.ILock;
 import org.apache.aurora.scheduler.storage.entities.ILockKey;
@@ -41,7 +38,7 @@ public interface LockStore {
    */
   Optional<ILock> fetchLock(ILockKey lockKey);
 
-  public interface Mutable extends LockStore {
+  interface Mutable extends LockStore {
     /**
      * Saves a new lock or overwrites the existing one with same LockKey.
      *

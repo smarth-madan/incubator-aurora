@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,37 +12,27 @@
 # limitations under the License.
 #
 
-import os
 import threading
 import time
 import traceback
 
-from .common.kill_manager import KillManager
-from .common.sandbox import DirectorySandbox, SandboxProvider
-from .common.status_checker import ChainedStatusChecker, ExitState
-from .common.task_info import assigned_task_from_mesos_task
-from .common.task_runner import (
-    TaskError,
-    TaskRunner,
-    TaskRunnerProvider,
-)
-from .executor_base import ExecutorBase
-from .status_manager import StatusManager
-
-import mesos_pb2 as mesos_pb
+from mesos.interface import mesos_pb2
 from twitter.common import log
-from twitter.common.concurrent import deadline, defer, Timeout
+from twitter.common.concurrent import Timeout, deadline, defer
 from twitter.common.metrics import Observable
 from twitter.common.quantity import Amount, Time
 
+from .common.kill_manager import KillManager
+from .common.sandbox import DefaultSandboxProvider
+from .common.status_checker import ChainedStatusChecker
+from .common.task_info import assigned_task_from_mesos_task
+from .common.task_runner import TaskError, TaskRunner, TaskRunnerProvider
+from .executor_base import ExecutorBase
+from .status_manager import StatusManager
 
-class DefaultSandboxProvider(SandboxProvider):
-  SANDBOX_NAME = 'sandbox'
 
-  def from_assigned_task(self, assigned_task):
-    return DirectorySandbox(
-        os.path.realpath(self.SANDBOX_NAME),
-        assigned_task.task.owner.role)
+def propagate_deadline(*args, **kw):
+  return deadline(*args, daemon=True, propagate=True, **kw)
 
 
 class AuroraExecutor(ExecutorBase, Observable):
@@ -57,7 +45,7 @@ class AuroraExecutor(ExecutorBase, Observable):
   def __init__(self,
                runner_provider,
                status_manager_class=StatusManager,
-               sandbox_provider=DefaultSandboxProvider,
+               sandbox_provider=DefaultSandboxProvider(),
                status_providers=(),
                clock=time):
 
@@ -73,7 +61,7 @@ class AuroraExecutor(ExecutorBase, Observable):
     self._status_manager = None
     self._status_manager_class = status_manager_class
     self._sandbox = None
-    self._sandbox_provider = sandbox_provider()
+    self._sandbox_provider = sandbox_provider
     self._kill_manager = KillManager()
     # Events that are exposed for interested entities
     self.runner_aborted = threading.Event()
@@ -101,7 +89,7 @@ class AuroraExecutor(ExecutorBase, Observable):
         - Set up necessary HealthCheckers
         - Set up StatusManager, and attach HealthCheckers
     """
-    self.send_update(driver, self._task_id, mesos_pb.TASK_STARTING, 'Initializing sandbox.')
+    self.send_update(driver, self._task_id, mesos_pb2.TASK_STARTING, 'Initializing sandbox.')
 
     if not self._initialize_sandbox(driver, assigned_task):
       return
@@ -112,46 +100,49 @@ class AuroraExecutor(ExecutorBase, Observable):
       self._runner = self._runner_provider.from_assigned_task(assigned_task, self._sandbox)
     except TaskError as e:
       self.runner_aborted.set()
-      self._die(driver, mesos_pb.TASK_FAILED, str(e))
+      self._die(driver, mesos_pb2.TASK_FAILED, str(e))
       return
 
     if not isinstance(self._runner, TaskRunner):
-      self._die(driver, mesos_pb.TASK_FAILED, 'Unrecognized task!')
+      self._die(driver, mesos_pb2.TASK_FAILED, 'Unrecognized task!')
       return
 
     if not self._start_runner(driver, assigned_task):
       return
 
-    self.send_update(driver, self._task_id, mesos_pb.TASK_RUNNING)
+    self.send_update(driver, self._task_id, mesos_pb2.TASK_RUNNING)
 
-    self._start_status_manager(driver, assigned_task)
+    try:
+      self._start_status_manager(driver, assigned_task)
+    except Exception:
+      log.error(traceback.format_exc())
+      self._die(driver, mesos_pb2.TASK_FAILED, "Internal error")
 
   def _initialize_sandbox(self, driver, assigned_task):
     self._sandbox = self._sandbox_provider.from_assigned_task(assigned_task)
     self.sandbox_initialized.set()
     try:
-      deadline(self._sandbox.create, timeout=self.SANDBOX_INITIALIZATION_TIMEOUT,
-               daemon=True, propagate=True)
+      propagate_deadline(self._sandbox.create, timeout=self.SANDBOX_INITIALIZATION_TIMEOUT)
     except Timeout:
-      self._die(driver, mesos_pb.TASK_FAILED, 'Timed out waiting for sandbox to initialize!')
+      self._die(driver, mesos_pb2.TASK_FAILED, 'Timed out waiting for sandbox to initialize!')
       return
     except self._sandbox.Error as e:
-      self._die(driver, mesos_pb.TASK_FAILED, 'Failed to initialize sandbox: %s' % e)
+      self._die(driver, mesos_pb2.TASK_FAILED, 'Failed to initialize sandbox: %s' % e)
       return
     self.sandbox_created.set()
     return True
 
   def _start_runner(self, driver, assigned_task):
     if self.runner_aborted.is_set():
-      self._die(driver, mesos_pb.TASK_KILLED, 'Task killed during initialization.')
+      self._die(driver, mesos_pb2.TASK_KILLED, 'Task killed during initialization.')
 
     try:
-      deadline(self._runner.start, timeout=self.START_TIMEOUT, propagate=True)
+      propagate_deadline(self._runner.start, timeout=self.START_TIMEOUT)
     except TaskError as e:
-      self._die(driver, mesos_pb.TASK_FAILED, 'Task initialization failed: %s' % e)
+      self._die(driver, mesos_pb2.TASK_FAILED, 'Task initialization failed: %s' % e)
       return False
     except Timeout:
-      self._die(driver, mesos_pb.TASK_LOST, 'Timed out waiting for task to start!')
+      self._die(driver, mesos_pb2.TASK_LOST, 'Timed out waiting for task to start!')
       return False
 
     self.runner_started.set()
@@ -194,32 +185,24 @@ class AuroraExecutor(ExecutorBase, Observable):
     self.log('Activating kill manager.')
     self._kill_manager.kill(reason)
 
-  @classmethod
-  def translate_exit_state_to_mesos(cls, exit_state):
-    # Put into executor_base?
-    if exit_state == ExitState.FAILED:
-      return mesos_pb.TASK_FAILED
-    elif exit_state == ExitState.KILLED:
-      return mesos_pb.TASK_KILLED
-    elif exit_state == ExitState.FINISHED:
-      return mesos_pb.TASK_FINISHED
-    elif exit_state == ExitState.LOST:
-      return mesos_pb.TASK_LOST
-    log.error('Unknown exit state, defaulting to TASK_FINISHED.')
-    return mesos_pb.TASK_FINISHED
-
   def _shutdown(self, status_result):
     runner_status = self._runner.status
 
     try:
-      deadline(self._runner.stop, timeout=self.STOP_TIMEOUT)
-    except Timeout:
-      log.error('Failed to stop runner within deadline.')
-
-    try:
-      deadline(self._chained_checker.stop, timeout=self.STOP_TIMEOUT)
+      propagate_deadline(self._chained_checker.stop, timeout=self.STOP_TIMEOUT)
     except Timeout:
       log.error('Failed to stop all checkers within deadline.')
+    except Exception:
+      log.error('Failed to stop health checkers:')
+      log.error(traceback.format_exc())
+
+    try:
+      propagate_deadline(self._runner.stop, timeout=self.STOP_TIMEOUT)
+    except Timeout:
+      log.error('Failed to stop runner within deadline.')
+    except Exception:
+      log.error('Failed to stop runner:')
+      log.error(traceback.format_exc())
 
     # If the runner was alive when _shutdown was called, defer to the status_result,
     # otherwise the runner's terminal state is the preferred state.
@@ -228,7 +211,7 @@ class AuroraExecutor(ExecutorBase, Observable):
     self.send_update(
         self._driver,
         self._task_id,
-        self.translate_exit_state_to_mesos(exit_status.status),
+        exit_status.status,
         status_result.reason)
 
     self.terminated.set()
@@ -239,7 +222,7 @@ class AuroraExecutor(ExecutorBase, Observable):
     try:
       assigned_task = assigned_task_from_mesos_task(task)
       return assigned_task
-    except Exception as e:
+    except Exception:
       log.fatal('Could not deserialize AssignedTask')
       log.fatal(traceback.format_exc())
       return None
@@ -261,7 +244,7 @@ class AuroraExecutor(ExecutorBase, Observable):
 
     if self._runner:
       log.error('Already running a task! %s' % self._task_id)
-      self.send_update(driver, task.task_id.value, mesos_pb.TASK_LOST,
+      self.send_update(driver, task.task_id.value, mesos_pb2.TASK_LOST,
           "Task already running on this executor: %s" % self._task_id)
       return
 
@@ -270,7 +253,7 @@ class AuroraExecutor(ExecutorBase, Observable):
 
     assigned_task = self.validate_task(task)
     if not assigned_task:
-      self.send_update(driver, self._task_id, mesos_pb.TASK_FAILED,
+      self.send_update(driver, self._task_id, mesos_pb2.TASK_FAILED,
           'Could not deserialize task.')
       defer(driver.stop, delay=self.STOP_WAIT)
       return

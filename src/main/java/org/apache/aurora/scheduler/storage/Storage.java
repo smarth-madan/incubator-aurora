@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -20,11 +18,11 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-import com.google.common.collect.ImmutableSet;
-import com.google.inject.BindingAnnotation;
+import javax.inject.Qualifier;
 
-import org.apache.aurora.scheduler.base.Query;
+import org.apache.aurora.scheduler.base.Query.Builder;
 import org.apache.aurora.scheduler.base.SchedulerException;
+import org.apache.aurora.scheduler.storage.entities.IJobConfiguration;
 import org.apache.aurora.scheduler.storage.entities.IScheduledTask;
 
 /**
@@ -34,16 +32,17 @@ public interface Storage {
 
   interface StoreProvider {
     SchedulerStore getSchedulerStore();
-    JobStore getJobStore();
+    CronJobStore getCronJobStore();
     TaskStore getTaskStore();
     LockStore getLockStore();
     QuotaStore getQuotaStore();
     AttributeStore getAttributeStore();
+    JobUpdateStore getJobUpdateStore();
   }
 
   interface MutableStoreProvider extends StoreProvider {
     SchedulerStore.Mutable getSchedulerStore();
-    JobStore.Mutable getJobStore();
+    CronJobStore.Mutable getCronJobStore();
 
     /**
      * Gets access to the mutable task store.
@@ -63,6 +62,7 @@ public interface Storage {
     LockStore.Mutable getLockStore();
     QuotaStore.Mutable getQuotaStore();
     AttributeStore.Mutable getAttributeStore();
+    JobUpdateStore.Mutable getJobUpdateStore();
   }
 
   /**
@@ -72,6 +72,7 @@ public interface Storage {
    * @param <T> Return type of the operation.
    * @param <E> Exception type thrown by the operation.
    */
+  @FunctionalInterface
   interface StorageOperation<S extends StoreProvider, T, E extends Exception> {
     /**
      * Abstracts a unit of work that has a result, but may also throw a specific exception.
@@ -89,14 +90,16 @@ public interface Storage {
    * @param <T> The type of result this unit of work produces.
    * @param <E> The type of exception this unit of work can throw.
    */
-  abstract class Work<T, E extends Exception> implements StorageOperation<StoreProvider, T, E> {
+  @FunctionalInterface
+  interface Work<T, E extends Exception> extends StorageOperation<StoreProvider, T, E> {
 
     /**
      * A convenient typedef for Work that throws no checked exceptions - it runs quietly.
      *
      * @param <T> The type of result this unit of work produces.
      */
-    public abstract static class Quiet<T> extends Work<T, RuntimeException> {
+    @FunctionalInterface
+    interface Quiet<T> extends Work<T, RuntimeException> {
       // typedef
     }
   }
@@ -107,15 +110,17 @@ public interface Storage {
    * @param <T> The type of result this unit of work produces.
    * @param <E> The type of exception this unit of work can throw.
    */
-  abstract class MutateWork<T, E extends Exception>
-      implements StorageOperation<MutableStoreProvider, T, E> {
+  @FunctionalInterface
+  interface MutateWork<T, E extends Exception>
+      extends StorageOperation<MutableStoreProvider, T, E> {
 
     /**
      * A convenient typedef for Work that throws no checked exceptions - it runs quietly.
      *
      * @param <T> The type of result this unit of work produces.
      */
-    public abstract static class Quiet<T> extends MutateWork<T, RuntimeException> {
+    @FunctionalInterface
+    interface Quiet<T> extends MutateWork<T, RuntimeException> {
       // typedef
     }
 
@@ -124,10 +129,11 @@ public interface Storage {
      *
      * @param <E> The type of exception this unit of work can throw.
      */
-    public abstract static class NoResult<E extends Exception> extends MutateWork<Void, E> {
+    @FunctionalInterface
+    interface NoResult<E extends Exception> extends MutateWork<Void, E> {
 
       @Override
-      public final Void apply(MutableStoreProvider storeProvider) throws E {
+      default Void apply(MutableStoreProvider storeProvider) throws E {
         execute(storeProvider);
         return null;
       }
@@ -139,13 +145,14 @@ public interface Storage {
        * @param storeProvider A provider to give access to different available stores.
        * @throws E if the unit of work could not be completed
        */
-      protected abstract void execute(MutableStoreProvider storeProvider) throws E;
+      void execute(MutableStoreProvider storeProvider) throws E;
 
       /**
        * A convenient typedef for Work with no result that throws no checked exceptions - it runs
        * quitely.
        */
-      public abstract static class Quiet extends NoResult<RuntimeException> {
+      @FunctionalInterface
+      interface Quiet extends NoResult<RuntimeException> {
         // typedef
       }
     }
@@ -165,22 +172,26 @@ public interface Storage {
   }
 
   /**
-   * Executes the unit of read-only {@code work}.  All data in the stores may be expected to be
-   * consistent, as the invocation is mutually exclusive of any writes.
-   *
-   * @param work The unit of work to execute.
-   * @param <T> The type of result this unit of work produces.
-   * @param <E> The type of exception this unit of work can throw.
-   * @return the result when the unit of work completes successfully
-   * @throws StorageException if there was a problem reading from stable storage.
-   * @throws E bubbled transparently when the unit of work throws
+   * Indicates that stable storage is temporarily unavailable.
    */
-  <T, E extends Exception> T consistentRead(Work<T, E> work) throws StorageException, E;
+  class TransientStorageException extends StorageException {
+    public TransientStorageException(String message) {
+      super(message);
+    }
+  }
 
   /**
-   * Executes a unit of read-only {@code work}.  This is functionally identical to
-   * {@link #consistentRead(Work)} with the exception that data in the stores may not be fully
-   * consistent.
+   * Executes the unit of read-only {@code work}.  The consistency model creates the possibility
+   * for a reader to read uncommitted state from a concurrent writer.
+   * <p>
+   * TODO(wfarner): Update this documentation once all stores are backed by
+   * {@link org.apache.aurora.scheduler.storage.db.DbStorage}, as the concurrency behavior will then
+   * be dictated by the {@link org.mybatis.guice.transactional.Transactional#isolation()} used.
+   * <p>
+   * TODO(wfarner): This method no longer needs to exist now that there is no global locking for
+   * reads.  We could instead directly inject the individual stores where they are used, as long
+   * as the stores have a layer to replicate what is currently done by
+   * {@link CallOrderEnforcingStorage}.
    *
    * @param work The unit of work to execute.
    * @param <T> The type of result this unit of work produces.
@@ -189,7 +200,7 @@ public interface Storage {
    * @throws StorageException if there was a problem reading from stable storage.
    * @throws E bubbled transparently when the unit of work throws
    */
-  <T, E extends Exception> T weaklyConsistentRead(Work<T, E> work) throws StorageException, E;
+  <T, E extends Exception> T read(Work<T, E> work) throws StorageException, E;
 
   /**
    * Executes the unit of mutating {@code work}.
@@ -208,23 +219,34 @@ public interface Storage {
   <T, E extends Exception> T write(MutateWork<T, E> work) throws StorageException, E;
 
   /**
+   * Recovers the contents of the storage, using the provided operation. This may be done with
+   * relaxed transactional guarantees and/or rollback support.
+   *
+   * @param work Bulk load operation.
+   * @param <E> The type of exception this unit of work can throw.
+   * @throws StorageException if there was a problem reading from or writing to stable storage.
+   * @throws E bubbled transparently when the unit of work throws
+   */
+  <E extends Exception> void bulkLoad(MutateWork.NoResult<E> work) throws StorageException, E;
+
+  /**
+   * Requests the underlying storage prepare its data set; ie: initialize schemas, begin syncing
+   * out of date data, etc.  This method should not block.
+   *
+   * @throws StorageException if there was a problem preparing storage.
+   */
+  void prepare() throws StorageException;
+
+  /**
    * A non-volatile storage that has additional methods to control its lifecycle.
    */
   interface NonVolatileStorage extends Storage {
-    /**
-     * Requests the underlying storage prepare its data set; ie: initialize schemas, begin syncing
-     * out of date data, etc.  This method should not block.
-     *
-     * @throws StorageException if there was a problem preparing storage.
-     */
-    void prepare() throws StorageException;
-
     /**
      * Prepares the underlying storage for serving traffic.
      *
      * @param initializationLogic work to perform after this storage system is ready but before
      *     allowing general use of
-     *     {@link #consistentRead}.
+     *     {@link #read}.
      * @throws StorageException if there was a starting storage.
      */
     void start(MutateWork.NoResult.Quiet initializationLogic) throws StorageException;
@@ -248,13 +270,13 @@ public interface Storage {
    */
   @Retention(RetentionPolicy.RUNTIME)
   @Target({ ElementType.PARAMETER, ElementType.METHOD })
-  @BindingAnnotation
+  @Qualifier
   public @interface Volatile { }
 
   /**
    * Utility functions for interacting with a Storage instance.
    */
-  public final class Util {
+  final class Util {
 
     private Util() {
       // Utility class.
@@ -264,40 +286,25 @@ public interface Storage {
      * Fetch tasks matching the query returned by {@code query} from {@code storage} in a
      * read operation.
      *
-     * @see #consistentFetchTasks
+     * @see #fetchTasks
      * @param storage Storage instance to query from.
      * @param query Builder of the query to perform.
      * @return Tasks returned from the query.
      */
-    public static ImmutableSet<IScheduledTask> consistentFetchTasks(
-        Storage storage,
-        final Query.Builder query) {
-
-      return storage.consistentRead(new Work.Quiet<ImmutableSet<IScheduledTask>>() {
+    public static Iterable<IScheduledTask> fetchTasks(Storage storage, final Builder query) {
+      return storage.read(new Work.Quiet<Iterable<IScheduledTask>>() {
         @Override
-        public ImmutableSet<IScheduledTask> apply(StoreProvider storeProvider) {
+        public Iterable<IScheduledTask> apply(StoreProvider storeProvider) {
           return storeProvider.getTaskStore().fetchTasks(query);
         }
       });
     }
 
-    /**
-     * Identical to {@link #consistentFetchTasks(Storage, Query.Builder)}, but fetches tasks using a
-     * weakly-consistent read operation.
-     *
-     * @see #consistentFetchTasks
-     * @param storage Storage instance to query from.
-     * @param query Builder of the query to perform.
-     * @return Tasks returned from the query.
-     */
-    public static ImmutableSet<IScheduledTask> weaklyConsistentFetchTasks(
-        Storage storage,
-        final Query.Builder query) {
-
-      return storage.weaklyConsistentRead(new Work.Quiet<ImmutableSet<IScheduledTask>>() {
+    public static Iterable<IJobConfiguration> fetchCronJobs(Storage storage) {
+      return storage.read(new Work.Quiet<Iterable<IJobConfiguration>>() {
         @Override
-        public ImmutableSet<IScheduledTask> apply(StoreProvider storeProvider) {
-          return storeProvider.getTaskStore().fetchTasks(query);
+        public Iterable<IJobConfiguration> apply(Storage.StoreProvider storeProvider) {
+          return storeProvider.getCronJobStore().fetchJobs();
         }
       });
     }

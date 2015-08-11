@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,60 +14,83 @@
 
 import contextlib
 
+import pytest
+from mock import Mock, call, create_autospec, patch
 from twitter.common.contextutil import temporary_file
-
-from gen.apache.aurora.ttypes import (
-    AssignedTask,
-    Identity,
-    ScheduledTask,
-    ScheduleStatus,
-    ScheduleStatusResult,
-    TaskEvent,
-    TaskQuery,
-)
 
 from apache.aurora.client.cli import (
     EXIT_COMMAND_FAILURE,
-    EXIT_INVALID_CONFIGURATION
+    EXIT_INTERRUPTED,
+    EXIT_INVALID_CONFIGURATION,
+    EXIT_OK,
+    Context
 )
 from apache.aurora.client.cli.client import AuroraCommandLine
-from apache.aurora.client.cli.util import AuroraClientCommandTest, FakeAuroraCommandContext
-from apache.aurora.client.hooks.hooked_api import HookedAuroraClientAPI
+from apache.aurora.client.cli.jobs import CreateJobCommand
+from apache.aurora.common.aurora_job_key import AuroraJobKey
 from apache.aurora.config import AuroraConfig
-from mock import Mock, patch
+
+from .util import AuroraClientCommandTest, FakeAuroraCommandContext, mock_verb_options
+
+from gen.apache.aurora.api.ttypes import (
+    JobKey,
+    ResponseCode,
+    Result,
+    ScheduleStatus,
+    ScheduleStatusResult,
+    TaskQuery
+)
+
+
+class UnknownException(Exception):
+  pass
+
+
+class TestCreateJobCommand(AuroraClientCommandTest):
+
+  def test_create_with_lock(self):
+    command = CreateJobCommand()
+
+    jobkey = AuroraJobKey("cluster", "role", "env", "job")
+    mock_options = mock_verb_options(command)
+    mock_options.jobspec = jobkey
+    mock_options.config_file = "/tmp/whatever"
+
+    fake_context = FakeAuroraCommandContext()
+    fake_context.set_options(mock_options)
+
+    mock_config = create_autospec(spec=AuroraConfig, spec_set=True, instance=True)
+    mock_job_config = Mock()
+    mock_job_config.has_cron_schedule.return_value = False
+    mock_config.raw.return_value = mock_job_config
+    fake_context.get_job_config = Mock(return_value=mock_config)
+    mock_api = fake_context.get_api("test")
+
+    mock_api.create_job.return_value = AuroraClientCommandTest.create_blank_response(
+      ResponseCode.LOCK_ERROR, "Error.")
+
+    with pytest.raises(Context.CommandError):
+      command.execute(fake_context)
+
+    mock_api.create_job.assert_called_once_with(mock_config)
+    self.assert_lock_message(fake_context)
 
 
 class TestClientCreateCommand(AuroraClientCommandTest):
 
   @classmethod
-  def create_mock_task(cls, task_id, instance_id, initial_time, status):
-    mock_task = Mock(spec=ScheduledTask)
-    mock_task.assignedTask = Mock(spec=AssignedTask)
-    mock_task.assignedTask.taskId = task_id
-    mock_task.assignedTask.instanceId = instance_id
-    mock_task.status = status
-    mock_task_event = Mock(spec=TaskEvent)
-    mock_task_event.timestamp = initial_time
-    mock_task.taskEvents = [mock_task_event]
-    return mock_task
-
-  @classmethod
   def create_mock_status_query_result(cls, scheduleStatus):
-    mock_query_result = cls.create_simple_success_response()
-    mock_query_result.result.scheduleStatusResult = Mock(spec=ScheduleStatusResult)
-    if scheduleStatus == ScheduleStatus.INIT:
-      # status query result for before job is launched.
-      mock_query_result.result.scheduleStatusResult.tasks = []
-    else:
-      mock_task_one = cls.create_mock_task('hello', 0, 1000, scheduleStatus)
-      mock_task_two = cls.create_mock_task('hello', 1, 1004, scheduleStatus)
-      mock_query_result.result.scheduleStatusResult.tasks = [mock_task_one, mock_task_two]
-    return mock_query_result
+    query_result = cls.create_simple_success_response()
+    query_result.result = Result(scheduleStatusResult=ScheduleStatusResult(tasks=[
+        cls.create_scheduled_task(0, initial_time=1000, status=scheduleStatus),
+        cls.create_scheduled_task(1, initial_time=1004, status=scheduleStatus)
+    ]))
+    return query_result
 
   @classmethod
-  def create_mock_query(cls):
-    return TaskQuery(owner=Identity(role=cls.TEST_ROLE), environment=cls.TEST_ENV,
-        jobName=cls.TEST_JOB)
+  def create_query(cls):
+    return TaskQuery(
+        jobKeys=[JobKey(role=cls.TEST_ROLE, environment=cls.TEST_ENV, name=cls.TEST_JOB)])
 
   @classmethod
   def get_createjob_response(cls):
@@ -88,8 +109,8 @@ class TestClientCreateCommand(AuroraClientCommandTest):
 
   @classmethod
   def assert_scheduler_called(cls, mock_api, mock_query, num_queries):
-    assert mock_api.scheduler_proxy.getTasksStatus.call_count == num_queries
-    mock_api.scheduler_proxy.getTasksStatus.assert_called_with(mock_query)
+    assert mock_api.scheduler_proxy.getTasksWithoutConfigs.call_count == num_queries
+    mock_api.scheduler_proxy.getTasksWithoutConfigs.assert_called_with(mock_query)
 
   def test_simple_successful_create_job(self):
     """Run a test of the "create" command against a mocked-out API:
@@ -99,13 +120,17 @@ class TestClientCreateCommand(AuroraClientCommandTest):
     # We'll patch out create_context, which will give us a fake context
     # object, and everything can be stubbed through that.
     mock_context = FakeAuroraCommandContext()
-    with patch('apache.aurora.client.cli.jobs.Job.create_context', return_value=mock_context):
+    with contextlib.nested(
+        # TODO(maxim): Patching threading.Event with all possible namespace/patch/mock
+        #              combinations did not produce the desired effect. Investigate why (AURORA-510)
+        patch('threading._Event.wait'),
+        patch('apache.aurora.client.cli.jobs.Job.create_context', return_value=mock_context)):
       # After making the client, create sets up a job monitor.
       # The monitor uses TaskQuery to get the tasks. It's called at least twice:once before
       # the job is created, and once after. So we need to set up mocks for the query results.
-      mock_query = self.create_mock_query()
+      mock_query = self.create_query()
       mock_context.add_expected_status_query_result(
-        self.create_mock_status_query_result(ScheduleStatus.INIT))
+        self.create_mock_status_query_result(ScheduleStatus.PENDING))
       mock_context.add_expected_status_query_result(
         self.create_mock_status_query_result(ScheduleStatus.RUNNING))
       api = mock_context.get_api('west')
@@ -117,12 +142,41 @@ class TestClientCreateCommand(AuroraClientCommandTest):
         fp.flush()
         cmd = AuroraCommandLine()
         cmd.execute(['job', 'create', '--wait-until=RUNNING', 'west/bozo/test/hello',
-            fp.name])
+                     fp.name])
 
       # Now check that the right API calls got made.
       # Check that create_job was called exactly once, with an AuroraConfig parameter.
       self.assert_create_job_called(api)
       self.assert_scheduler_called(api, mock_query, 2)
+
+  def test_simple_successful_create_job_open_page(self):
+    mock_context = FakeAuroraCommandContext()
+    with contextlib.nested(
+        # TODO(maxim): Patching threading.Event with all possible namespace/patch/mock
+        #              combinations did not produce the desired effect. Investigate why (AURORA-510)
+        patch('threading._Event.wait'),
+        patch('apache.aurora.client.cli.jobs.Job.create_context', return_value=mock_context)):
+      mock_query = self.create_query()
+      mock_context.add_expected_status_query_result(
+        self.create_mock_status_query_result(ScheduleStatus.PENDING))
+      mock_context.add_expected_status_query_result(
+        self.create_mock_status_query_result(ScheduleStatus.RUNNING))
+      api = mock_context.get_api('west')
+      api.create_job.return_value = self.get_createjob_response()
+      with temporary_file() as fp:
+        fp.write(self.get_valid_config())
+        fp.flush()
+        cmd = AuroraCommandLine()
+        result = cmd.execute(['job', 'create', '--wait-until=RUNNING', '--open-browser',
+                     'west/bozo/test/hello',
+            fp.name])
+        assert result == EXIT_OK
+
+      self.assert_create_job_called(api)
+      self.assert_scheduler_called(api, mock_query, 2)
+      assert self.mock_webbrowser.mock_calls == [
+          call("http://something_or_other/scheduler/bozo/test/hello")
+      ]
 
   def test_create_job_delayed(self):
     """Run a test of the "create" command against a mocked-out API:
@@ -130,11 +184,10 @@ class TestClientCreateCommand(AuroraClientCommandTest):
     """
     mock_context = FakeAuroraCommandContext()
     with contextlib.nested(
-        patch('time.sleep'),
+        patch('threading._Event.wait'),
         patch('apache.aurora.client.cli.jobs.Job.create_context', return_value=mock_context)):
-      mock_query = self.create_mock_query()
-      for result in [ScheduleStatus.INIT, ScheduleStatus.PENDING, ScheduleStatus.PENDING,
-          ScheduleStatus.RUNNING, ScheduleStatus.FINISHED]:
+      mock_query = self.create_query()
+      for result in [ScheduleStatus.PENDING, ScheduleStatus.PENDING, ScheduleStatus.RUNNING]:
         mock_context.add_expected_status_query_result(self.create_mock_status_query_result(result))
       api = mock_context.get_api('west')
       api.create_job.return_value = self.get_createjob_response()
@@ -144,10 +197,8 @@ class TestClientCreateCommand(AuroraClientCommandTest):
         cmd = AuroraCommandLine()
         cmd.execute(['job', 'create', '--wait-until=RUNNING', 'west/bozo/test/hello',
             fp.name])
-        # Now check that the right API calls got made.
-        # Check that create_job was called exactly once, with an AuroraConfig parameter.
         self.assert_create_job_called(api)
-        self.assert_scheduler_called(api, mock_query, 4)
+        self.assert_scheduler_called(api, mock_query, 3)
 
   def test_create_job_failed(self):
     """Run a test of the "create" command against a mocked-out API:
@@ -159,7 +210,6 @@ class TestClientCreateCommand(AuroraClientCommandTest):
           self.create_mock_status_query_result(ScheduleStatus.INIT))
       api = mock_context.get_api('west')
       api.create_job.return_value = self.get_failed_createjob_response()
-      # This is the real test: invoke create as if it had been called by the command line.
       with temporary_file() as fp:
         fp.write(self.get_valid_config())
         fp.flush()
@@ -168,12 +218,8 @@ class TestClientCreateCommand(AuroraClientCommandTest):
             'west/bozo/test/hello', fp.name])
         assert result == EXIT_COMMAND_FAILURE
 
-      # Now check that the right API calls got made.
       # Check that create_job was called exactly once, with an AuroraConfig parameter.
       self.assert_create_job_called(api)
-
-      # getTasksStatus was called once, before the create_job
-      assert api.scheduler_proxy.getTasksStatus.call_count == 1
 
   def test_create_job_failed_invalid_config(self):
     """Run a test of the "create" command against a mocked-out API, with a configuration
@@ -192,4 +238,185 @@ class TestClientCreateCommand(AuroraClientCommandTest):
       # Check that create_job was not called.
       api = mock_context.get_api('west')
       assert api.create_job.call_count == 0
-      assert api.scheduler_proxy.getTasksStatus.call_count == 0
+
+  def test_interrupt(self):
+    mock_context = FakeAuroraCommandContext()
+    with contextlib.nested(
+        patch('time.sleep'),
+        patch('apache.aurora.client.cli.jobs.Job.create_context',
+            side_effect=KeyboardInterrupt())):
+      api = mock_context.get_api('west')
+      api.create_job.return_value = self.get_createjob_response()
+
+      with temporary_file() as fp:
+        fp.write(self.get_valid_config())
+        fp.flush()
+        cmd = AuroraCommandLine()
+        result = cmd.execute(['job', 'create', '--wait-until=RUNNING', 'west/bozo/test/hello',
+            fp.name])
+        assert result == EXIT_INTERRUPTED
+        assert api.create_job.call_count == 0
+
+  def test_interrupt_error(self):
+    mock_context = FakeAuroraCommandContext()
+    with contextlib.nested(
+        patch('time.sleep'),
+        patch('time.time', return_value=23),
+        patch('apache.aurora.client.cli.jobs.Job.create_context', side_effect=UnknownException())):
+      api = mock_context.get_api('west')
+      api.create_job.return_value = self.get_createjob_response()
+      with temporary_file() as fp:
+        fp.write(self.get_valid_config())
+        fp.flush()
+        cmd = AuroraCommandLine()
+        with pytest.raises(UnknownException):
+          cmd.execute(['job', 'create', '--wait-until=RUNNING', 'west/bozo/test/hello', fp.name])
+
+  def test_simple_successful_create_job_output(self):
+    """Run a test of the "create" command against a mocked-out API:
+    Verifies that the creation command generates the correct output.
+    """
+    mock_context = FakeAuroraCommandContext()
+    with contextlib.nested(
+        patch('threading._Event.wait'),
+        patch('apache.aurora.client.cli.jobs.Job.create_context', return_value=mock_context)):
+      mock_context.add_expected_status_query_result(
+        self.create_mock_status_query_result(ScheduleStatus.PENDING))
+      mock_context.add_expected_status_query_result(
+        self.create_mock_status_query_result(ScheduleStatus.RUNNING))
+      mock_context.add_expected_status_query_result(
+        self.create_mock_status_query_result(ScheduleStatus.RUNNING))
+      api = mock_context.get_api('west')
+      api.create_job.return_value = self.get_createjob_response()
+
+      with temporary_file() as fp:
+        fp.write(self.get_valid_config())
+        fp.flush()
+        cmd = AuroraCommandLine()
+        result = cmd.execute(['job', 'create', '--wait-until=RUNNING', 'west/bozo/test/hello',
+            fp.name])
+        assert result == EXIT_OK
+      assert mock_context.get_out() == [
+          "Job create succeeded: job url=http://something_or_other/scheduler/bozo/test/hello"]
+      assert mock_context.get_err() == []
+
+  def test_create_job_startup_fails(self):
+    mock_context = FakeAuroraCommandContext()
+    with contextlib.nested(
+        patch('threading._Event.wait'),
+        patch('apache.aurora.client.cli.jobs.Job.create_context', return_value=mock_context)):
+      mock_context.add_expected_status_query_result(
+        self.create_mock_status_query_result(ScheduleStatus.PENDING))
+      mock_context.add_expected_status_query_result(
+        self.create_mock_status_query_result(ScheduleStatus.RUNNING))
+
+      # We need to override the side_effect behavior of check_status in the context.
+      def check_status_side_effect(*args):
+        return self.create_error_response()
+
+      mock_context.get_api("west").check_status.side_effect = check_status_side_effect
+
+      api = mock_context.get_api('west')
+      api.create_job.return_value = self.get_createjob_response()
+
+      with temporary_file() as fp:
+        fp.write(self.get_valid_config())
+        fp.flush()
+        cmd = AuroraCommandLine()
+        result = cmd.execute(['job', 'create', '--wait-until=RUNNING', 'west/bozo/test/hello',
+            fp.name])
+        assert result == EXIT_COMMAND_FAILURE
+      assert mock_context.get_out() == []
+      assert mock_context.get_err() == ["Error occurred while creating job west/bozo/test/hello"]
+
+  def test_create_job_failed_output(self):
+    """Test that a failed create generates the correct error messages"""
+    mock_context = FakeAuroraCommandContext()
+    with patch('apache.aurora.client.cli.jobs.Job.create_context', return_value=mock_context):
+      mock_context.add_expected_status_query_result(
+          self.create_mock_status_query_result(ScheduleStatus.INIT))
+      api = mock_context.get_api('west')
+      api.create_job.return_value = self.get_failed_createjob_response()
+      with temporary_file() as fp:
+        fp.write(self.get_valid_config())
+        fp.flush()
+        cmd = AuroraCommandLine()
+        result = cmd.execute(['job', 'create', '--wait-until=RUNNING',
+            'west/bozo/test/hello', fp.name])
+        assert result == EXIT_COMMAND_FAILURE
+
+      # Check that create_job was called exactly once, with an AuroraConfig parameter.
+      assert mock_context.get_out() == []
+      assert mock_context.get_err() == [
+        'Job creation failed due to error:', '\tWhoops']
+
+  def test_simple_successful_create_job_with_bindings(self):
+    """Run a test of the "create" command against a mocked-out API:
+    Verifies that the creation command sends the right API RPCs, and performs the correct
+    tests on the result."""
+
+    mock_context = FakeAuroraCommandContext()
+    with contextlib.nested(
+        patch('threading._Event.wait'),
+        patch('apache.aurora.client.cli.jobs.Job.create_context', return_value=mock_context)):
+      mock_query = self.create_query()
+      mock_context.add_expected_status_query_result(
+        self.create_mock_status_query_result(ScheduleStatus.PENDING))
+      mock_context.add_expected_status_query_result(
+        self.create_mock_status_query_result(ScheduleStatus.RUNNING))
+      api = mock_context.get_api('west')
+      api.create_job.return_value = self.get_createjob_response()
+
+      # This is the real test: invoke create as if it had been called by the command line.
+      with temporary_file() as fp:
+        fp.write(self.get_unbound_test_config())
+        fp.flush()
+        cmd = AuroraCommandLine()
+        cmd.execute(['job', 'create', '--wait-until=RUNNING', '--bind', 'cluster_binding=west',
+            '--bind', 'instances_binding=20', '--bind', 'TEST_BATCH=1',
+            '--bind', 'flags_binding=-some_flag=value',
+            'west/bozo/test/hello',
+            fp.name])
+
+      # Now check that the right API calls got made.
+      # Check that create_job was called exactly once, with an AuroraConfig parameter.
+      self.assert_create_job_called(api)
+      self.assert_scheduler_called(api, mock_query, 2)
+
+  def test_failed_create_job_with_incomplete_bindings(self):
+    """Run a test of the "create" command against a mocked-out API:
+    Verifies that the creation command sends the right API RPCs, and performs the correct
+    tests on the result."""
+
+    mock_context = FakeAuroraCommandContext()
+    with contextlib.nested(
+        patch('threading._Event.wait'),
+        patch('apache.aurora.client.cli.jobs.Job.create_context', return_value=mock_context)):
+
+      # This is the real test: invoke create as if it had been called by the command line.
+      with temporary_file() as fp:
+        fp.write(self.get_unbound_test_config())
+        fp.flush()
+        cmd = AuroraCommandLine()
+        result = cmd.execute(['job', 'create', '--wait-until=RUNNING',
+            '--bind', 'cluster_binding=west',
+           'west/bozo/test/hello',
+            fp.name])
+        assert result == EXIT_INVALID_CONFIGURATION
+      assert mock_context.get_out() == []
+      assert mock_context.get_err() == [
+            "Error loading configuration: "
+            "TypeCheck(FAILED): MesosJob[update_config] failed: "
+            "UpdateConfig[batch_size] failed: u'{{TEST_BATCH}}' not an integer"]
+
+  def test_create_cron_job_fails(self):
+    """Test a cron job is not accepted."""
+    mock_context = FakeAuroraCommandContext()
+    with patch('apache.aurora.client.cli.jobs.Job.create_context', return_value=mock_context):
+      with temporary_file() as fp:
+        fp.write(self.get_valid_cron_config())
+        fp.flush()
+        cmd = AuroraCommandLine()
+        result = cmd.execute(['job', 'create', '--wait-until=RUNNING',
+            'west/bozo/test/hello', fp.name])
+        assert result == EXIT_COMMAND_FAILURE

@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -25,7 +23,6 @@ import com.google.inject.TypeLiteral;
 import com.google.inject.matcher.Matchers;
 import com.twitter.common.testing.easymock.EasyMockTest;
 
-import org.apache.aurora.gen.AuroraAdmin;
 import org.apache.aurora.gen.Response;
 import org.apache.aurora.gen.ResponseCode;
 import org.apache.aurora.gen.TaskQuery;
@@ -39,13 +36,13 @@ import static org.junit.Assert.assertSame;
 
 public class FeatureToggleInterceptorTest extends EasyMockTest {
 
-  private AuroraAdmin.Iface realThrift;
-  private AuroraAdmin.Iface decoratedThrift;
+  private AnnotatedAuroraAdmin realThrift;
+  private AnnotatedAuroraAdmin decoratedThrift;
   private Predicate<Method> predicate;
 
   @Before
   public void setUp() {
-    realThrift = createMock(AuroraAdmin.Iface.class);
+    realThrift = createMock(AnnotatedAuroraAdmin.class);
     predicate = createMock(new Clazz<Predicate<Method>>() { });
     Injector injector = Guice.createInjector(new AbstractModule() {
       @Override
@@ -58,7 +55,7 @@ public class FeatureToggleInterceptorTest extends EasyMockTest {
             new FeatureToggleInterceptor());
       }
     });
-    decoratedThrift = injector.getInstance(AuroraAdmin.Iface.class);
+    decoratedThrift = injector.getInstance(AnnotatedAuroraAdmin.class);
   }
 
   @Test
@@ -67,7 +64,7 @@ public class FeatureToggleInterceptorTest extends EasyMockTest {
     Response response = new Response()
         .setResponseCode(ResponseCode.OK);
 
-    expect(predicate.apply(EasyMock.<Method>anyObject())).andReturn(true);
+    expect(predicate.apply(EasyMock.anyObject())).andReturn(true);
     expect(realThrift.getTasksStatus(query)).andReturn(response);
 
     control.replay();
@@ -78,7 +75,7 @@ public class FeatureToggleInterceptorTest extends EasyMockTest {
   @Test
   public void testPredicateDeny() throws Exception {
     TaskQuery query = new TaskQuery();
-    expect(predicate.apply(EasyMock.<Method>anyObject())).andReturn(false);
+    expect(predicate.apply(EasyMock.anyObject())).andReturn(false);
 
     control.replay();
 

@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,14 +14,14 @@
 
 from inspect import getargspec
 
-from apache.aurora.client.hooks.hooked_api import HookedAuroraClientAPI, NonHookedAuroraClientAPI
+from mock import Mock, create_autospec
+
 from apache.aurora.client.api import AuroraClientAPI
+from apache.aurora.client.hooks.hooked_api import HookedAuroraClientAPI, NonHookedAuroraClientAPI
 from apache.aurora.common.cluster import Cluster
 
-from mock import Mock
-
-
-API_METHODS = ('cancel_update', 'create_job', 'kill_job', 'restart', 'start_cronjob', 'update_job')
+API_METHODS = ('cancel_update', 'create_job', 'kill_job', 'restart', 'start_cronjob', 'update_job',
+               'start_job_update')
 API_METHODS_WITH_CONFIG_PARAM_ADDED = ('cancel_update', 'kill_job', 'restart', 'start_cronjob')
 
 
@@ -40,8 +38,9 @@ def test_api_methods_exist(method_name):
 
 
 def test_api_methods_params(method_name):
-  cluster = Mock(spec=Cluster)
-  api = HookedAuroraClientAPI(cluster=cluster)  # cant use mock here; need to inspect methods
+  cluster = create_autospec(spec=Cluster, instance=True)
+  # cant use mock here; need to inspect methods
+  api = HookedAuroraClientAPI(cluster=cluster, user_agent="test-client")
 
   hooked_method = getattr(api, method_name)
   nonhooked_method = getattr(super(HookedAuroraClientAPI, api), method_name)
@@ -69,5 +68,3 @@ def test_api_methods_params(method_name):
   else:
     assert nonhooked_argspec == hooked_argspec
   assert nonhooked_argspec == nonhooked_argspec
-
-

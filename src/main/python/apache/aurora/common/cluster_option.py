@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -15,10 +13,7 @@
 #
 
 from copy import copy
-from optparse import (
-    NO_DEFAULT,
-    OptionValueError,
-    Option)
+from optparse import Option, OptionValueError
 
 
 def _check_mesos_cluster(option, opt, value):

@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,25 +14,15 @@
 
 from __future__ import print_function
 
-from collections import Mapping, namedtuple
-from contextlib import contextmanager
-import itertools
 import json
 import os
-import sys
-
-from .cluster import Cluster
+from collections import Mapping
+from contextlib import contextmanager
 
 from pystachio import Required, String
 from twitter.common.collections import maybe_list
 
-
-try:
-  import yaml
-  HAS_YAML = True
-except ImportError:
-  HAS_YAML = False
-
+from .cluster import Cluster
 
 __all__ = (
   'CLUSTERS',
@@ -43,10 +31,7 @@ __all__ = (
 
 
 class NameTrait(Cluster.Trait):
-  name = Required(String)
-
-
-Parser = namedtuple('Parser', 'loader exception')
+  name = Required(String)  # noqa
 
 
 class Clusters(Mapping):
@@ -56,24 +41,16 @@ class Clusters(Mapping):
   class UnknownFormatError(Error): pass
   class ParseError(Error): pass
 
-  LOADERS = {'.json': Parser(json.load, ValueError)}
-  if HAS_YAML:
-    LOADERS['.yml'] = Parser(yaml.load, yaml.parser.ParserError)
-
   @classmethod
   def from_file(cls, filename):
     return cls(list(cls.iter_clusters(filename)))
 
   @classmethod
   def iter_clusters(cls, filename):
-    _, ext = os.path.splitext(filename)
-    if ext not in cls.LOADERS:
-      raise cls.UnknownFormatError('Unknown clusters file extension: %r' % ext)
     with open(filename) as fp:
-      loader, exc_type = cls.LOADERS[ext]
       try:
-        document = loader(fp)
-      except exc_type as e:
+        document = json.load(fp)
+      except ValueError as e:
         raise cls.ParseError('Unable to parse %s: %s' % (filename, e))
       if isinstance(document, list):
         iterator = document
@@ -112,9 +89,11 @@ class Clusters(Mapping):
     """Patch this Clusters instance with a new list of clusters in a
        contextmanager.  Intended for testing purposes."""
     old_clusters = self._clusters.copy()
-    self.replace(cluster_list)
-    yield self
-    self._clusters = old_clusters
+    try:
+      self.replace(cluster_list)
+      yield self
+    finally:
+      self._clusters = old_clusters
 
   def __iter__(self):
     return iter(self._clusters)
@@ -130,7 +109,6 @@ class Clusters(Mapping):
           name, ', '.join(self._clusters.keys())))
 
 
-
 DEFAULT_SEARCH_PATHS = (
   os.environ.get('AURORA_CONFIG_ROOT') or '/etc/aurora',
   os.path.expanduser('~/.aurora')
@@ -142,8 +120,8 @@ CLUSTERS = Clusters(())
 
 def load():
   """(re-)load all clusters from the search path."""
-  for search_path, ext in itertools.product(DEFAULT_SEARCH_PATHS, Clusters.LOADERS):
-    filename = os.path.join(search_path, 'clusters' + ext)
+  for search_path in DEFAULT_SEARCH_PATHS:
+    filename = os.path.join(search_path, 'clusters.json')
     if os.path.exists(filename):
       CLUSTERS.update(Clusters.from_file(filename).values())
 

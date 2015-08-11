@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -25,6 +23,8 @@ import org.apache.aurora.scheduler.storage.entities.IAssignedTask;
 import org.apache.aurora.scheduler.storage.entities.ITaskConfig;
 import org.apache.mesos.Protos.SlaveID;
 
+import static org.apache.aurora.scheduler.storage.Storage.MutableStoreProvider;
+
 /**
  * A manager for the state of tasks.  Most modifications to tasks should be made here, especially
  * those that alter the {@link ScheduleStatus} of tasks.
@@ -44,12 +44,11 @@ public interface StateManager {
    *                 decision to defer the action was mde.
    * @param newState State to move the task to.
    * @param auditMessage Message to include with the transition.
-   * @return {@code true} if the transition was performed and the task was moved to
-   *         {@code newState}, {@code false} if the transition was not allowed, or the task was not
-   *         in {@code casState}.
+   * @return {@link StateChangeResult}.
    *
    */
-  boolean changeState(
+  StateChangeResult changeState(
+      MutableStoreProvider storeProvider,
       String taskId,
       Optional<ScheduleStatus> casState,
       ScheduleStatus newState,
@@ -59,6 +58,7 @@ public interface StateManager {
    * Assigns a task to a specific slave.
    * This will modify the task record to reflect the host assignment and return the updated record.
    *
+   * @param storeProvider Storage provider.
    * @param taskId ID of the task to mutate.
    * @param slaveHost Host name that the task is being assigned to.
    * @param slaveId ID of the slave that the task is being assigned to.
@@ -66,26 +66,32 @@ public interface StateManager {
    * @return The updated task record, or {@code null} if the task was not found.
    */
   IAssignedTask assignTask(
+      MutableStoreProvider storeProvider,
       String taskId,
       String slaveHost,
       SlaveID slaveId,
-      Set<Integer> assignedPorts);
+      Map<String, Integer> assignedPorts);
 
   /**
-   * Inserts new tasks into the store. Tasks will immediately move into PENDING and will be eligible
-   * for scheduling.
+   * Inserts pending instances using {@code task} as their configuration. Tasks will immediately
+   * move into PENDING and will be eligible for scheduling.
    *
-   * @param tasks Tasks to insert, mapped by their instance IDs.
+   * @param storeProvider Storage provider.
+   * @param task Task template.
+   * @param instanceIds Instance IDs to assign to new PENDING tasks.
    */
-  void insertPendingTasks(Map<Integer, ITaskConfig> tasks);
+  void insertPendingTasks(
+      MutableStoreProvider storeProvider,
+      ITaskConfig task,
+      Set<Integer> instanceIds);
 
   /**
-   * Deletes records of tasks from the task store.
-   * This will not perform any state checking or state transitions, but will immediately remove
-   * the tasks from the store.  It will also silently ignore attempts to delete task IDs that do
-   * not exist.
+   * Attempts to delete tasks from the task store.
+   * If the task is not currently in a state that is considered safe for deletion,
+   * side-effect actions will be performed to reconcile the state conflict.
    *
+   * @param storeProvider Storage provider.
    * @param taskIds IDs of tasks to delete.
    */
-  void deleteTasks(final Set<String> taskIds);
+  void deleteTasks(MutableStoreProvider storeProvider, Set<String> taskIds);
 }

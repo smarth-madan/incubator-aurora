@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,10 +14,10 @@
 
 import re
 
-from gen.apache.aurora.constants import GOOD_IDENTIFIER_PATTERN_PYTHON
-from gen.apache.aurora.ttypes import Identity, JobKey, TaskQuery
-
 from twitter.common.lang import Compatibility, total_ordering
+
+from gen.apache.aurora.api.constants import GOOD_IDENTIFIER_PATTERN_PYTHON
+from gen.apache.aurora.api.ttypes import JobKey, TaskQuery
 
 
 # TODO(ksweeney): This can just probably just extend namedtuple.
@@ -88,7 +86,7 @@ class AuroraJobKey(object):
     return JobKey(role=self.role, environment=self.env, name=self.name)
 
   def to_thrift_query(self):
-    return TaskQuery(owner=Identity(role=self.role), environment=self.env, jobName=self.name)
+    return TaskQuery(jobKeys=[JobKey(role=self.role, environment=self.env, name=self.name)])
 
   def __iter__(self):
     """Support 'cluster, role, env, name = job_key' assignment."""
@@ -107,6 +105,9 @@ class AuroraJobKey(object):
     if not isinstance(other, AuroraJobKey):
       return NotImplemented
     return self.to_path() == other.to_path()
+
+  def __ne__(self, other):
+    return not (self == other)
 
   def __lt__(self, other):
     if not isinstance(other, AuroraJobKey):

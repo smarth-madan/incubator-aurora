@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,42 +13,37 @@
  */
 package org.apache.aurora.scheduler.storage.log;
 
-import java.lang.annotation.Annotation;
-
 import javax.inject.Singleton;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.inject.AbstractModule;
-import com.google.inject.Key;
+import com.google.common.hash.HashFunction;
+import com.google.common.hash.Hashing;
+import com.google.inject.PrivateModule;
 import com.google.inject.TypeLiteral;
-import com.twitter.common.application.ShutdownRegistry;
+import com.google.inject.assistedinject.FactoryModuleBuilder;
 import com.twitter.common.args.Arg;
 import com.twitter.common.args.CmdLine;
 import com.twitter.common.quantity.Amount;
 import com.twitter.common.quantity.Data;
 import com.twitter.common.quantity.Time;
-import com.twitter.common.util.Clock;
 
-import org.apache.aurora.scheduler.log.Log;
 import org.apache.aurora.scheduler.storage.CallOrderEnforcingStorage;
 import org.apache.aurora.scheduler.storage.DistributedSnapshotStore;
+import org.apache.aurora.scheduler.storage.Storage;
+import org.apache.aurora.scheduler.storage.Storage.NonVolatileStorage;
+import org.apache.aurora.scheduler.storage.log.LogManager.DeduplicateSnapshots;
 import org.apache.aurora.scheduler.storage.log.LogManager.MaxEntrySize;
-import org.apache.aurora.scheduler.storage.log.LogManager.SnapshotSetting;
-import org.apache.aurora.scheduler.storage.log.LogStorage.ShutdownGracePeriod;
-import org.apache.aurora.scheduler.storage.log.LogStorage.SnapshotInterval;
+import org.apache.aurora.scheduler.storage.log.LogStorage.Settings;
+
+import static org.apache.aurora.scheduler.storage.log.EntrySerializer.EntrySerializerImpl;
+import static org.apache.aurora.scheduler.storage.log.LogManager.DeflateSnapshots;
+import static org.apache.aurora.scheduler.storage.log.LogManager.LogEntryHashFunction;
+import static org.apache.aurora.scheduler.storage.log.SnapshotDeduplicator.SnapshotDeduplicatorImpl;
 
 /**
  * Bindings for scheduler distributed log based storage.
- * <p/>
- * Requires bindings for:
- * <ul>
- *   <li>{@link Clock}</li>
- *   <li>{@link ShutdownRegistry}</li>
- *   <li>The concrete {@link Log} implementation.</li>
- * </ul>
- * <p/>
  */
-public class LogStorageModule extends AbstractModule {
+public class LogStorageModule extends PrivateModule {
 
   @CmdLine(name = "dlog_shutdown_grace_period",
            help = "Specifies the maximum time to wait for scheduled checkpoint and snapshot "
@@ -71,29 +64,41 @@ public class LogStorageModule extends AbstractModule {
   public static final Arg<Amount<Integer, Data>> MAX_LOG_ENTRY_SIZE =
       Arg.create(Amount.of(512, Data.KB));
 
+  @CmdLine(name = "deduplicate_snapshots",
+      help = "Write snapshots in deduplicated format. For details and backwards compatibility "
+          + "concerns see docs/scheduler-storage.md.")
+  private static final Arg<Boolean> DEDUPLICATE_SNAPSHOTS = Arg.create(false);
+
   @CmdLine(name = "deflate_snapshots", help = "Whether snapshots should be deflate-compressed.")
   private static final Arg<Boolean> DEFLATE_SNAPSHOTS = Arg.create(true);
 
   @Override
   protected void configure() {
-    requireBinding(Log.class);
-    requireBinding(Clock.class);
-    requireBinding(ShutdownRegistry.class);
-
-    bindInterval(ShutdownGracePeriod.class, SHUTDOWN_GRACE_PERIOD);
-    bindInterval(SnapshotInterval.class, SNAPSHOT_INTERVAL);
+    bind(Settings.class)
+        .toInstance(new Settings(SHUTDOWN_GRACE_PERIOD.get(), SNAPSHOT_INTERVAL.get()));
 
     bind(new TypeLiteral<Amount<Integer, Data>>() { }).annotatedWith(MaxEntrySize.class)
         .toInstance(MAX_LOG_ENTRY_SIZE.get());
     bind(LogManager.class).in(Singleton.class);
-    bind(Boolean.class).annotatedWith(SnapshotSetting.class).toInstance(DEFLATE_SNAPSHOTS.get());
-
+    bindConstant().annotatedWith(DeduplicateSnapshots.class).to(DEDUPLICATE_SNAPSHOTS.get());
+    bindConstant().annotatedWith(DeflateSnapshots.class).to(DEFLATE_SNAPSHOTS.get());
     bind(LogStorage.class).in(Singleton.class);
+
     install(CallOrderEnforcingStorage.wrappingModule(LogStorage.class));
     bind(DistributedSnapshotStore.class).to(LogStorage.class);
-  }
+    expose(Storage.class);
+    expose(NonVolatileStorage.class);
+    expose(DistributedSnapshotStore.class);
 
-  private void bindInterval(Class<? extends Annotation> key, Arg<Amount<Long, Time>> value) {
-    bind(Key.get(new TypeLiteral<Amount<Long, Time>>() { }, key)).toInstance(value.get());
+    bind(EntrySerializer.class).to(EntrySerializerImpl.class);
+    // TODO(ksweeney): We don't need a cryptographic checksum here - assess performance of MD5
+    // versus a faster error-detection checksum like CRC32 for large Snapshots.
+    bind(HashFunction.class).annotatedWith(LogEntryHashFunction.class).toInstance(Hashing.md5());
+
+    bind(SnapshotDeduplicator.class).to(SnapshotDeduplicatorImpl.class);
+
+    install(new FactoryModuleBuilder()
+        .implement(StreamManager.class, StreamManagerImpl.class)
+        .build(StreamManagerFactory.class));
   }
 }

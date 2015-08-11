@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -22,6 +20,8 @@ import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import javax.inject.Qualifier;
+
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
@@ -33,7 +33,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.inject.Binder;
-import com.google.inject.BindingAnnotation;
 import com.google.inject.matcher.AbstractMatcher;
 import com.google.inject.matcher.Matcher;
 import com.google.inject.matcher.Matchers;
@@ -54,7 +53,7 @@ public final class GuiceUtils {
 
   // Method annotation that allows a trapped interface to whitelist methods that may throw
   // unchecked exceptions.
-  @BindingAnnotation
+  @Qualifier
   @Target(METHOD) @Retention(RUNTIME)
   public @interface AllowUnchecked { }
 
@@ -166,7 +165,7 @@ public final class GuiceUtils {
         "Non-void methods must be explicitly whitelisted with @AllowUnchecked: " + disallowed);
 
     Matcher<Method> matcher =
-        Matchers.<Method>not(WHITELIST_MATCHER).and(interfaceMatcher(wrapInterface, false));
+        Matchers.not(WHITELIST_MATCHER).and(interfaceMatcher(wrapInterface, false));
     binder.bindInterceptor(Matchers.subclassesOf(wrapInterface), matcher,
         new MethodInterceptor() {
           @Override

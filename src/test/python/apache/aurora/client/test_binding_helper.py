@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,15 +12,13 @@
 # limitations under the License.
 #
 
-import textwrap
+from pystachio import Ref
+from pystachio.matcher import Any, Matcher
+from twitter.common.contextutil import temporary_file
 
 from apache.aurora.client import binding_helper
 from apache.aurora.client.binding_helper import BindingHelper, CachingBindingHelper
 from apache.aurora.config import AuroraConfig
-from twitter.common.contextutil import temporary_file
-
-from pystachio import Ref
-from pystachio.matcher import Matcher, Any
 
 
 GENERIC_CONFIG = """
@@ -104,10 +100,10 @@ def test_registry():
   binding_helper.unregister_all()
   assert len(binding_helper._BINDING_HELPERS) == 0
 
-  UncachedHelper.register()
+  BindingHelper.register(UncachedHelper())
   assert len(binding_helper._BINDING_HELPERS) == 1
 
-  CachedHelper.register()
+  BindingHelper.register(CachedHelper())
   assert len(binding_helper._BINDING_HELPERS) == 2
 
   binding_helper.unregister_all()
@@ -116,8 +112,8 @@ def test_registry():
 
 def test_helper_types():
   binding_helper.unregister_all()
-  UncachedHelper.register()
-  CachedHelper.register()
+  BindingHelper.register(UncachedHelper())
+  BindingHelper.register(CachedHelper())
 
   uncached_helper = binding_helper._BINDING_HELPERS[0]
   cached_helper = binding_helper._BINDING_HELPERS[1]

@@ -1,6 +1,4 @@
 /**
- * Copyright 2014 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -24,7 +22,6 @@ import org.junit.Test;
 
 import static org.apache.aurora.gen.ScheduleStatus.FINISHED;
 import static org.apache.aurora.gen.ScheduleStatus.RUNNING;
-import static org.apache.aurora.scheduler.base.TaskTestUtil.makeTask;
 import static org.apache.aurora.scheduler.base.Tasks.getLatestActiveTask;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
@@ -33,13 +30,12 @@ public class TasksTest {
 
   @Test
   public void testOrderedStatusesForCompleteness() {
-    // OrderedTaskStatuses should contain all ScheduleStatus values except INIT and UNKNOWN.
+    // OrderedTaskStatuses should contain all ScheduleStatus values except INIT.
     assertEquals(
         ImmutableSet.copyOf(ScheduleStatus.values()),
         ImmutableSet.builder()
             .addAll(Tasks.ORDERED_TASK_STATUSES)
             .add(ScheduleStatus.INIT)
-            .add(ScheduleStatus.UNKNOWN)
             .build());
   }
 
@@ -53,7 +49,7 @@ public class TasksTest {
     IScheduledTask r3 = makeTask(RUNNING, 600);
 
     try {
-      getLatestActiveTask(ImmutableList.<IScheduledTask>of());
+      getLatestActiveTask(ImmutableList.of());
       fail("Should have thrown IllegalArgumentException.");
     } catch (IllegalArgumentException e) {
       // Expected when called with an empty task list.
@@ -79,5 +75,12 @@ public class TasksTest {
 
   private void assertLatestTask(IScheduledTask expectedLatest, IScheduledTask... tasks) {
     assertEquals(expectedLatest, getLatestActiveTask(ImmutableList.copyOf(tasks)));
+  }
+
+  private IScheduledTask makeTask(ScheduleStatus status, long timestamp) {
+    return TaskTestUtil.addStateTransition(
+        TaskTestUtil.makeTask("id-" + timestamp, TaskTestUtil.JOB),
+        status,
+        timestamp);
   }
 }

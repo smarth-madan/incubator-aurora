@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -20,7 +18,7 @@ import com.google.common.base.Optional;
 
 import org.apache.aurora.scheduler.storage.entities.IResourceAggregate;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
 
 /**
  * Calculates and formats detailed quota comparison result.
@@ -51,6 +49,10 @@ public class QuotaCheckResult {
     private Resource(String unit) {
       this.unit = unit;
     }
+
+    String getUnit() {
+      return unit;
+    }
   }
 
   private final Optional<String> details;
@@ -58,12 +60,12 @@ public class QuotaCheckResult {
 
   @VisibleForTesting
   public QuotaCheckResult(Result result) {
-    this(result, Optional.<String>absent());
+    this(result, Optional.absent());
   }
 
   private QuotaCheckResult(Result result, Optional<String> details) {
-    this.result = checkNotNull(result);
-    this.details = checkNotNull(details);
+    this.result = requireNonNull(result);
+    this.details = requireNonNull(details);
   }
 
   /**
@@ -109,7 +111,7 @@ public class QuotaCheckResult {
           .append(" quota exceeded by ")
           .append(String.format("%.2f", b - a))
           .append(" ")
-          .append(resource.unit);
+          .append(resource.getUnit());
     }
 
     return result;

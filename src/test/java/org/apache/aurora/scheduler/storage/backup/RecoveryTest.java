@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,27 +14,21 @@
 package org.apache.aurora.scheduler.storage.backup;
 
 import java.io.File;
+import java.util.concurrent.ScheduledExecutorService;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.io.Files;
 import com.google.common.testing.TearDown;
 import com.twitter.common.base.Command;
-import com.twitter.common.io.FileUtils;
 import com.twitter.common.quantity.Amount;
 import com.twitter.common.quantity.Time;
 import com.twitter.common.testing.easymock.EasyMockTest;
 import com.twitter.common.util.testing.FakeClock;
 
-import org.apache.aurora.gen.AssignedTask;
-import org.apache.aurora.gen.HostAttributes;
-import org.apache.aurora.gen.Identity;
-import org.apache.aurora.gen.Lock;
-import org.apache.aurora.gen.ScheduledTask;
-import org.apache.aurora.gen.TaskConfig;
-import org.apache.aurora.gen.storage.QuotaConfiguration;
 import org.apache.aurora.gen.storage.SchedulerMetadata;
 import org.apache.aurora.gen.storage.Snapshot;
-import org.apache.aurora.gen.storage.StoredJob;
 import org.apache.aurora.scheduler.base.Query;
+import org.apache.aurora.scheduler.base.TaskTestUtil;
 import org.apache.aurora.scheduler.base.Tasks;
 import org.apache.aurora.scheduler.storage.DistributedSnapshotStore;
 import org.apache.aurora.scheduler.storage.SnapshotStore;
@@ -49,6 +41,7 @@ import org.apache.aurora.scheduler.storage.backup.StorageBackup.StorageBackupImp
 import org.apache.aurora.scheduler.storage.backup.StorageBackup.StorageBackupImpl.BackupConfig;
 import org.apache.aurora.scheduler.storage.backup.TemporaryStorage.TemporaryStorageFactory;
 import org.apache.aurora.scheduler.storage.entities.IScheduledTask;
+import org.apache.aurora.scheduler.testing.FakeScheduledExecutor;
 import org.easymock.Capture;
 import org.junit.Before;
 import org.junit.Test;
@@ -61,8 +54,8 @@ import static org.junit.Assert.assertEquals;
 public class RecoveryTest extends EasyMockTest {
 
   private static final Amount<Long, Time> INTERVAL = Amount.of(1L, Time.HOURS);
-  private static final ScheduledTask TASK1 = makeTask("task1");
-  private static final ScheduledTask TASK2 = makeTask("task2");
+  private static final IScheduledTask TASK1 = TaskTestUtil.makeTask("task1", TaskTestUtil.JOB);
+  private static final IScheduledTask TASK2 = TaskTestUtil.makeTask("task2", TaskTestUtil.JOB);
   private static final Snapshot SNAPSHOT1 = makeSnapshot(TASK1, TASK2);
 
   private SnapshotStore<Snapshot> snapshotStore;
@@ -76,7 +69,7 @@ public class RecoveryTest extends EasyMockTest {
 
   @Before
   public void setUp() {
-    final File backupDir = FileUtils.createTempDir();
+    final File backupDir = Files.createTempDir();
     addTearDown(new TearDown() {
       @Override
       public void tearDown() throws Exception {
@@ -88,10 +81,15 @@ public class RecoveryTest extends EasyMockTest {
     primaryStorage = createMock(Storage.class);
     storeProvider = createMock(MutableStoreProvider.class);
     shutDownNow = createMock(Command.class);
-    clock = new FakeClock();
+    ScheduledExecutorService executor = createMock(ScheduledExecutorService.class);
+    clock = FakeScheduledExecutor.scheduleExecutor(executor);
     TemporaryStorageFactory factory = new TemporaryStorageFactory();
-    storageBackup =
-        new StorageBackupImpl(snapshotStore, clock, new BackupConfig(backupDir, 5, INTERVAL));
+    storageBackup = new StorageBackupImpl(
+        snapshotStore,
+        clock,
+        new BackupConfig(backupDir, 5, INTERVAL),
+        executor);
+
     recovery = new RecoveryImpl(backupDir, factory, primaryStorage, distributedStore, shutDownNow);
   }
 
@@ -105,7 +103,7 @@ public class RecoveryTest extends EasyMockTest {
 
     control.replay();
 
-    assertEquals(ImmutableSet.<String>of(), recovery.listBackups());
+    assertEquals(ImmutableSet.of(), recovery.listBackups());
 
     clock.advance(INTERVAL);
     storageBackup.createSnapshot();
@@ -123,7 +121,7 @@ public class RecoveryTest extends EasyMockTest {
   @Test
   public void testModifySnapshotBeforeCommit() throws Exception {
     expect(snapshotStore.createSnapshot()).andReturn(SNAPSHOT1);
-    Snapshot modified = SNAPSHOT1.deepCopy().setTasks(ImmutableSet.of(TASK1));
+    Snapshot modified = SNAPSHOT1.deepCopy().setTasks(ImmutableSet.of(TASK1.newBuilder()));
     Capture<MutateWork<Object, Exception>> transaction = createCapture();
     expect(primaryStorage.write(capture(transaction))).andReturn(null);
     distributedStore.persist(modified);
@@ -158,23 +156,14 @@ public class RecoveryTest extends EasyMockTest {
     recovery.commit();
   }
 
-  private static Snapshot makeSnapshot(ScheduledTask... tasks) {
+  private static Snapshot makeSnapshot(IScheduledTask... tasks) {
     return new Snapshot()
-        .setHostAttributes(ImmutableSet.<HostAttributes>of())
-        .setJobs(ImmutableSet.<StoredJob>of())
+        .setHostAttributes(ImmutableSet.of())
+        .setCronJobs(ImmutableSet.of())
         .setSchedulerMetadata(new SchedulerMetadata().setVersion(CURRENT_API_VERSION))
-        .setQuotaConfigurations(ImmutableSet.<QuotaConfiguration>of())
-        .setTasks(ImmutableSet.<ScheduledTask>builder().add(tasks).build())
-        .setLocks(ImmutableSet.<Lock>of());
-  }
-
-  private static ScheduledTask makeTask(String taskId) {
-    return new ScheduledTask().setAssignedTask(
-        new AssignedTask()
-            .setTaskId(taskId)
-            .setTask(new TaskConfig()
-                .setJobName("job-" + taskId)
-                .setEnvironment("test")
-                .setOwner(new Identity().setRole("role-" + taskId).setUser("user-" + taskId))));
+        .setQuotaConfigurations(ImmutableSet.of())
+        .setTasks(IScheduledTask.toBuildersSet(ImmutableSet.copyOf(tasks)))
+        .setLocks(ImmutableSet.of())
+        .setJobUpdateDetails(ImmutableSet.of());
   }
 }

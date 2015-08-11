@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -40,7 +38,7 @@ public interface QuotaStore {
    */
   Map<String, IResourceAggregate> fetchQuotas();
 
-  public interface Mutable extends QuotaStore {
+  interface Mutable extends QuotaStore {
 
     /**
      * Deletes all quotas.

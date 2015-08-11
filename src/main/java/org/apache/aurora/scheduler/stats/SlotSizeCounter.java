@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -21,16 +19,14 @@ import javax.inject.Inject;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableMap;
 
-import org.apache.aurora.gen.ResourceAggregate;
-import org.apache.aurora.scheduler.quota.ResourceAggregates;
+import org.apache.aurora.scheduler.base.ResourceAggregates;
 import org.apache.aurora.scheduler.storage.entities.IResourceAggregate;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
 
 /**
  * A stat computer that aggregates the number of 'slots' available at different pre-determined
@@ -38,10 +34,10 @@ import static com.google.common.base.Preconditions.checkNotNull;
  */
 class SlotSizeCounter implements Runnable {
   private static final Map<String, IResourceAggregate> SLOT_SIZES = ImmutableMap.of(
-      "small", IResourceAggregate.build(new ResourceAggregate(1.0, 1024, 4096)),
-      "medium", IResourceAggregate.build(new ResourceAggregate(4.0, 8192, 16384)),
-      "large", IResourceAggregate.build(new ResourceAggregate(8.0, 16384, 32768)),
-      "xlarge", IResourceAggregate.build(new ResourceAggregate(16.0, 32768, 65536)));
+      "small", ResourceAggregates.SMALL,
+      "medium", ResourceAggregates.MEDIUM,
+      "large", ResourceAggregates.LARGE,
+      "xlarge", ResourceAggregates.XLARGE);
 
   private final Map<String, IResourceAggregate> slotSizes;
   private final MachineResourceProvider machineResourceProvider;
@@ -53,9 +49,9 @@ class SlotSizeCounter implements Runnable {
       MachineResourceProvider machineResourceProvider,
       CachedCounters cachedCounters) {
 
-    this.slotSizes = checkNotNull(slotSizes);
-    this.machineResourceProvider = checkNotNull(machineResourceProvider);
-    this.cachedCounters = checkNotNull(cachedCounters);
+    this.slotSizes = requireNonNull(slotSizes);
+    this.machineResourceProvider = requireNonNull(machineResourceProvider);
+    this.cachedCounters = requireNonNull(cachedCounters);
   }
 
   static class MachineResource {
@@ -63,7 +59,7 @@ class SlotSizeCounter implements Runnable {
     private final boolean dedicated;
 
     public MachineResource(IResourceAggregate size, boolean dedicated) {
-      this.size = Preconditions.checkNotNull(size);
+      this.size = requireNonNull(size);
       this.dedicated = dedicated;
     }
 

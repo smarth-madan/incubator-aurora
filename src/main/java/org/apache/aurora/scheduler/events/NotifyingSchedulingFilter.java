@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -20,21 +18,17 @@ import java.lang.annotation.Target;
 import java.util.Set;
 
 import javax.inject.Inject;
+import javax.inject.Qualifier;
 
-import com.google.inject.BindingAnnotation;
-
-import org.apache.aurora.scheduler.ResourceSlot;
+import org.apache.aurora.scheduler.base.TaskGroupKey;
 import org.apache.aurora.scheduler.events.PubsubEvent.Vetoed;
-import org.apache.aurora.scheduler.filter.AttributeAggregate;
 import org.apache.aurora.scheduler.filter.SchedulingFilter;
-import org.apache.aurora.scheduler.storage.entities.ITaskConfig;
 
 import static java.lang.annotation.ElementType.FIELD;
 import static java.lang.annotation.ElementType.METHOD;
 import static java.lang.annotation.ElementType.PARAMETER;
 import static java.lang.annotation.RetentionPolicy.RUNTIME;
-
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
 
 /**
  * A decorating scheduling filter that sends an event when a scheduling assignment is vetoed.
@@ -44,7 +38,7 @@ class NotifyingSchedulingFilter implements SchedulingFilter {
   /**
    * Binding annotation that the underlying {@link SchedulingFilter} must be bound with.
    */
-  @BindingAnnotation
+  @Qualifier
   @Target({FIELD, PARAMETER, METHOD}) @Retention(RUNTIME)
   public @interface NotifyDelegate { }
 
@@ -56,21 +50,15 @@ class NotifyingSchedulingFilter implements SchedulingFilter {
       @NotifyDelegate SchedulingFilter delegate,
       EventSink eventSink) {
 
-    this.delegate = checkNotNull(delegate);
-    this.eventSink = checkNotNull(eventSink);
+    this.delegate = requireNonNull(delegate);
+    this.eventSink = requireNonNull(eventSink);
   }
 
   @Override
-  public Set<Veto> filter(
-      ResourceSlot offer,
-      String slaveHost,
-      ITaskConfig task,
-      String taskId,
-      AttributeAggregate jobState) {
-
-    Set<Veto> vetoes = delegate.filter(offer, slaveHost, task, taskId, jobState);
+  public Set<Veto> filter(UnusedResource resource, ResourceRequest request) {
+    Set<Veto> vetoes = delegate.filter(resource, request);
     if (!vetoes.isEmpty()) {
-      eventSink.post(new Vetoed(taskId, vetoes));
+      eventSink.post(new Vetoed(TaskGroupKey.from(request.getTask()), vetoes));
     }
 
     return vetoes;

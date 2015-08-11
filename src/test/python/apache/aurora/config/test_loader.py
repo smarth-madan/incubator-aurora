@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,21 +14,19 @@
 
 import json
 import tempfile
+from io import BytesIO
 
+import pytest
 from twitter.common.contextutil import temporary_file
 
 from apache.aurora.config import AuroraConfig
 from apache.aurora.config.loader import AuroraConfigLoader
-from apache.thermos.config.loader import ThermosTaskWrapper
-
-from pystachio import Environment
-import pytest
-
 
 
 BAD_MESOS_CONFIG = """
 3 2 1 3 2 4 2 3
 """
+
 
 MESOS_CONFIG = """
 HELLO_WORLD = MesosJob(
@@ -46,6 +42,7 @@ HELLO_WORLD = MesosJob(
 jobs = [HELLO_WORLD]
 """
 
+
 def test_enoent():
   nonexistent_file = tempfile.mktemp()
   with pytest.raises(AuroraConfigLoader.NotFound):
@@ -53,30 +50,28 @@ def test_enoent():
 
 
 def test_bad_config():
-  with temporary_file() as fp:
-    fp.write(BAD_MESOS_CONFIG)
-    fp.flush()
-    with pytest.raises(AuroraConfigLoader.InvalidConfigError):
-      AuroraConfigLoader.load(fp.name)
+  with pytest.raises(AuroraConfigLoader.InvalidConfigError):
+    AuroraConfigLoader.load(BytesIO(BAD_MESOS_CONFIG))
+
+
+def test_filter_schema():
+  env = AuroraConfigLoader.load(BytesIO(MESOS_CONFIG))
+  job_dict = env['jobs'][0].get()
+  job_dict['unknown_attribute'] = 'foo bar baz'
+  job_json_string = json.dumps(job_dict)
+  # If this fails, will raise an InvalidConfigError or other exception and fail the test.
+  AuroraConfigLoader.loads_json(job_json_string)
 
 
 def test_empty_config():
-  with temporary_file() as fp:
-    fp.flush()
-    AuroraConfigLoader.load(fp.name)
+  AuroraConfigLoader.load(BytesIO())
 
 
 def test_load_json():
-  with temporary_file() as fp:
-    fp.write(MESOS_CONFIG)
-    fp.flush()
-    env = AuroraConfigLoader.load(fp.name)
-    job = env['jobs'][0]
-  with temporary_file() as fp:
-    fp.write(json.dumps(job.get()))
-    fp.flush()
-    new_job = AuroraConfigLoader.load_json(fp.name)
-    assert new_job == job
+  env = AuroraConfigLoader.load(BytesIO(MESOS_CONFIG))
+  job = env['jobs'][0]
+  new_job = AuroraConfigLoader.loads_json(json.dumps(job.get()))
+  assert new_job == job
 
 
 def test_load():
@@ -93,14 +88,11 @@ def test_load():
 
 
 def test_pick():
-  with temporary_file() as fp:
-    fp.write(MESOS_CONFIG)
-    fp.flush()
-    env = AuroraConfigLoader.load(fp.name)
+  env = AuroraConfigLoader.load(BytesIO(MESOS_CONFIG))
 
   hello_world = env['jobs'][0]
   assert AuroraConfig.pick(env, 'hello_world', None) == hello_world
 
-  env['jobs'][0] = env['jobs'][0](name = 'something_{{else}}')
+  env['jobs'][0] = env['jobs'][0](name='something_{{else}}')
   assert str(AuroraConfig.pick(env, 'something_else', [{'else': 'else'}]).name()) == (
       'something_else')

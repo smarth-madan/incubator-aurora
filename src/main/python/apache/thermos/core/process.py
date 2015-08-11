@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -22,8 +20,6 @@ commandline in a subprocess of its own.
 
 """
 
-from abc import abstractmethod
-import getpass
 import grp
 import os
 import pwd
@@ -31,27 +27,20 @@ import signal
 import subprocess
 import sys
 import time
+from abc import abstractmethod
 
-
-from gen.apache.thermos.ttypes import (
-    ProcessState,
-    ProcessStatus,
-    RunnerCkpt,
-)
-
-from twitter.common.dirutil import (
-    lock_file,
-    safe_mkdir,
-    safe_open,
-)
-from twitter.common.lang import Interface
 from twitter.common import log
+from twitter.common.dirutil import lock_file, safe_mkdir, safe_open
+from twitter.common.lang import Interface
 from twitter.common.quantity import Amount, Time
 from twitter.common.recordio import ThriftRecordReader, ThriftRecordWriter
+
+from gen.apache.thermos.ttypes import ProcessState, ProcessStatus, RunnerCkpt
 
 
 class Platform(Interface):
   """Abstract representation of a platform encapsulating system-level functions"""
+
   @abstractmethod
   def clock(self):
     pass
@@ -104,10 +93,6 @@ class ProcessBase(object):
     self._stdout = None
     self._stderr = None
     self._user = user
-    if self._user:
-      user, current_user = self._getpwuid() # may raise self.UnknownUserError
-      if user != current_user and os.geteuid() != 0:
-        raise self.PermissionError('Must be root to run processes as other users!')
     self._ckpt = None
     self._ckpt_head = -1
     if platform is None:
@@ -116,6 +101,19 @@ class ProcessBase(object):
 
   def _log(self, msg):
     log.debug('[process:%5s=%s]: %s' % (self._pid, self.name(), msg))
+
+  def _getpwuid(self):
+    """Returns a tuple of the user (i.e. --user) and current user."""
+    uid = os.getuid()
+    try:
+      current_user = pwd.getpwuid(uid)
+    except KeyError:
+      raise self.UnknownUserError('Unknown uid %s!' % uid)
+    try:
+      user = pwd.getpwnam(self._user) if self._user is not None else current_user
+    except KeyError:
+      raise self.UnknownUserError('Unable to get pwent information!')
+    return user, current_user
 
   def _ckpt_write(self, msg):
     self._init_ckpt_if_necessary()
@@ -204,11 +202,14 @@ class ProcessBase(object):
 
   def _prepare_fork(self):
     user, current_user = self._getpwuid()
+    if self._user:
+      if user != current_user and os.geteuid() != 0:
+        raise self.PermissionError('Must be root to run processes as other users!')
     uid, gid = user.pw_uid, user.pw_gid
     self._fork_time = self._platform.clock().time()
     self._setup_ckpt()
-    self._stdout = safe_open(self._pathspec.with_filename('stdout').getpath('process_logdir'), "w")
-    self._stderr = safe_open(self._pathspec.with_filename('stderr').getpath('process_logdir'), "w")
+    self._stdout = safe_open(self._pathspec.with_filename('stdout').getpath('process_logdir'), "a")
+    self._stderr = safe_open(self._pathspec.with_filename('stderr').getpath('process_logdir'), "a")
     os.chown(self._stdout.name, user.pw_uid, user.pw_gid)
     os.chown(self._stderr.name, user.pw_uid, user.pw_gid)
 
@@ -216,18 +217,6 @@ class ProcessBase(object):
     self._write_initial_update()
     self._ckpt.close()
     self._ckpt = None
-
-  def _getpwuid(self):
-    """Returns a tuple of the user (i.e. --user) and current user."""
-    try:
-      current_user = pwd.getpwuid(os.getuid())
-    except KeyError:
-      raise self.UnknownUserError('Unknown user %s!' % self._user)
-    try:
-      user = pwd.getpwnam(self._user) if self._user else current_user
-    except KeyError:
-      raise self.UnknownUserError('Unable to get pwent information!')
-    return user, current_user
 
   def start(self):
     """
@@ -237,18 +226,21 @@ class ProcessBase(object):
       The parent returns immediately and populates information about the pid of the co-ordinator.
       The child (co-ordinator) will launch the target process in a subprocess.
     """
-    self._prepare_fork()
+    self._prepare_fork()  # calls _setup_ckpt which can raise CheckpointError
+                          # calls _getpwuid which can raise:
+                          #    UnknownUserError
+                          #    PermissionError
     self._pid = self._platform.fork()
     if self._pid == 0:
       self._pid = self._platform.getpid()
-      self._wait_for_control()
+      self._wait_for_control()  # can raise CheckpointError
       try:
         self.execute()
       finally:
         self._ckpt.close()
         self.finish()
     else:
-      self._finalize_fork()
+      self._finalize_fork()  # can raise CheckpointError
 
   def execute(self):
     raise NotImplementedError

@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -17,30 +15,30 @@
 import getpass
 import re
 
-from apache.aurora.config.schema.base import (
-  HealthCheckConfig,
-  MesosContext,
-  MesosTaskInstance,
-)
-from apache.thermos.config.loader import ThermosTaskValidator
-
-from gen.apache.aurora.constants import GOOD_IDENTIFIER_PATTERN_PYTHON, AURORA_EXECUTOR_NAME
-from gen.apache.aurora.ttypes import (
-  Constraint,
-  CronCollisionPolicy,
-  ExecutorConfig,
-  Identity,
-  JobConfiguration,
-  JobKey,
-  LimitConstraint,
-  Package,
-  TaskConfig,
-  TaskConstraint,
-  ValueConstraint,
-)
-
 from pystachio import Empty, Ref
 from twitter.common.lang import Compatibility
+
+from apache.aurora.config.schema.base import HealthCheckConfig, MesosContext, MesosTaskInstance
+from apache.thermos.config.loader import ThermosTaskValidator
+
+from gen.apache.aurora.api.constants import AURORA_EXECUTOR_NAME, GOOD_IDENTIFIER_PATTERN_PYTHON
+from gen.apache.aurora.api.ttypes import (
+    Constraint,
+    Container,
+    CronCollisionPolicy,
+    DockerContainer,
+    DockerParameter,
+    ExecutorConfig,
+    Identity,
+    JobConfiguration,
+    JobKey,
+    LimitConstraint,
+    MesosContainer,
+    Metadata,
+    TaskConfig,
+    TaskConstraint,
+    ValueConstraint
+)
 
 __all__ = (
   'InvalidConfig',
@@ -57,8 +55,8 @@ def constraints_to_thrift(constraints):
   result = set()
   for attribute, constraint_value in constraints.items():
     assert isinstance(attribute, Compatibility.string) and (
-           isinstance(constraint_value, Compatibility.string)), (
-      "Both attribute name and value in constraints must be string")
+        isinstance(constraint_value, Compatibility.string)), (
+            "Both attribute name and value in constraints must be string")
     constraint = Constraint()
     constraint.name = attribute
     task_constraint = TaskConstraint()
@@ -82,29 +80,20 @@ def constraints_to_thrift(constraints):
 
 def task_instance_from_job(job, instance):
   instance_context = MesosContext(instance=instance)
-  # TODO(Sathya): Remove health_check_interval_secs references after deprecation cycle is complete.
   health_check_config = HealthCheckConfig()
-  if job.has_health_check_interval_secs():
-    health_check_config = HealthCheckConfig(interval_secs=job.health_check_interval_secs().get())
-  elif job.has_health_check_config():
+  if job.has_health_check_config():
     health_check_config = job.health_check_config()
   ti = MesosTaskInstance(task=job.task(),
                          role=job.role(),
-                         health_check_interval_secs=health_check_config.interval_secs().get(),
                          health_check_config=health_check_config,
                          instance=instance)
   if job.has_announce():
     ti = ti(announce=job.announce())
   if job.has_environment():
     ti = ti(environment=job.environment())
-  return ti.bind(mesos=instance_context).interpolate()
-
-
-def translate_cron_policy(policy):
-  cron_policy = CronCollisionPolicy._NAMES_TO_VALUES.get(policy.get())
-  if cron_policy is None:
-    raise InvalidConfig('Invalid cron policy: %s' % policy.get())
-  return cron_policy
+  if job.has_lifecycle():
+    ti = ti(lifecycle=job.lifecycle())
+  return ti.bind(mesos=instance_context)
 
 
 def fully_interpolated(pystachio_object, coerce_fn=lambda i: i):
@@ -122,29 +111,35 @@ def fully_interpolated(pystachio_object, coerce_fn=lambda i: i):
   return coerce_fn(value.get())
 
 
-def select_cron_policy(cron_policy, cron_collision_policy):
-  if cron_policy is Empty and cron_collision_policy is Empty:
-    return CronCollisionPolicy.KILL_EXISTING
-  elif cron_policy is not Empty and cron_collision_policy is Empty:
-    return translate_cron_policy(cron_policy)
-  elif cron_policy is Empty and cron_collision_policy is not Empty:
-    return translate_cron_policy(cron_collision_policy)
-  else:
-    raise InvalidConfig('Specified both cron_policy and cron_collision_policy!')
+def parse_enum(enum_type, value):
+  enum_value = enum_type._NAMES_TO_VALUES.get(value.get().upper())
+  if enum_value is None:
+    raise InvalidConfig('Invalid %s type: %s' % (enum_type, value.get()))
+  return enum_value
+
+
+def select_cron_policy(cron_policy):
+  return parse_enum(CronCollisionPolicy, cron_policy)
 
 
 def select_service_bit(job):
-  if not job.has_daemon() and not job.has_service():
-    return False
-  elif job.has_daemon() and not job.has_service():
-    return fully_interpolated(job.daemon(), bool)
-  elif not job.has_daemon() and job.has_service():
-    return fully_interpolated(job.service(), bool)
+  return fully_interpolated(job.service(), bool)
+
+
+def create_container_config(container):
+  if container is Empty:
+    return Container(MesosContainer(), None)
+  elif container.docker() is not Empty:
+    params = list()
+    if container.docker().parameters() is not Empty:
+      for p in fully_interpolated(container.docker().parameters()):
+        params.append(DockerParameter(p['name'], p['value']))
+    return Container(None, DockerContainer(fully_interpolated(container.docker().image()), params))
   else:
-    raise InvalidConfig('Specified both daemon and service bits!')
+    raise InvalidConfig('If a container is specified it must set one type.')
 
 
-# TODO(wickman) Due to MESOS-2718 we should revert to using the MesosTaskInstance.
+# TODO(wickman): We should revert to using the MesosTaskInstance.
 #
 # Using the MesosJob instead of the MesosTaskInstance was to allow for
 # planned future use of fields such as 'cluster' and to allow for conversion
@@ -153,13 +148,8 @@ def select_service_bit(job):
 #
 # In the meantime, we are erasing fields of the Job that are controversial.
 # This achieves roughly the same effect as using the MesosTaskInstance.
-# The future work is tracked at MESOS-2727.
 ALIASED_FIELDS = (
-  'cron_policy',
-  'cron_collision_policy',
   'update_config',
-  'daemon',
-  'service',
   'instances'
 )
 
@@ -182,9 +172,7 @@ THERMOS_PORT_SCOPE_REF = Ref.from_address('thermos.ports')
 THERMOS_TASK_ID_REF = Ref.from_address('thermos.task_id')
 
 
-# TODO(wickman) Make this a method directly on an AuroraConfig so that we don't
-# need the packages/ports shenanigans.
-def convert(job, packages=frozenset(), ports=frozenset()):
+def convert(job, metadata=frozenset(), ports=frozenset()):
   """Convert a Pystachio MesosJob to an Aurora Thrift JobConfiguration."""
 
   owner = Identity(role=fully_interpolated(job.role()), user=getpass.getuser())
@@ -210,10 +198,8 @@ def convert(job, packages=frozenset(), ports=frozenset()):
   task.priority = fully_interpolated(job.priority())
   task.contactEmail = not_empty_or(job.contact(), None)
 
-  # Add package tuples to a task, to display in the scheduler UI.
-  task.packagesDEPRECATED = frozenset(
-      Package(role=str(role), name=str(package_name), version=int(version))
-      for role, package_name, version in packages)
+  # Add metadata to a task, to display in the scheduler UI.
+  task.metadata = frozenset(Metadata(key=str(key), value=str(value)) for key, value in metadata)
 
   # task components
   if not task_raw.has_resources():
@@ -232,15 +218,17 @@ def convert(job, packages=frozenset(), ports=frozenset()):
     raise InvalidConfig('Task has invalid resources.  cpu/ramMb/diskMb must all be positive: '
         'cpu:%r ramMb:%r diskMb:%r' % (task.numCpus, task.ramMb, task.diskMb))
 
+  task.job = key
   task.owner = owner
   task.requestedPorts = ports
-  task.taskLinks = not_empty_or(job.task_links(), {})
+  task.taskLinks = {}  # See AURORA-739
   task.constraints = constraints_to_thrift(not_empty_or(job.constraints(), {}))
+  task.container = create_container_config(job.container())
 
   underlying, refs = job.interpolate()
 
   # need to fake an instance id for the sake of schema checking
-  underlying_checked = underlying.bind(mesos = {'instance': 31337})
+  underlying_checked = underlying.bind(mesos={'instance': 31337})
   try:
     ThermosTaskValidator.assert_valid_task(underlying_checked.task())
   except ThermosTaskValidator.InvalidTaskError as e:
@@ -258,9 +246,6 @@ def convert(job, packages=frozenset(), ports=frozenset()):
   if unbound:
     raise InvalidConfig('Config contains unbound variables: %s' % ' '.join(map(str, unbound)))
 
-  cron_schedule = not_empty_or(job.cron_schedule(), '')
-  cron_policy = select_cron_policy(job.cron_policy(), job.cron_collision_policy())
-
   task.executorConfig = ExecutorConfig(
       name=AURORA_EXECUTOR_NAME,
       data=filter_aliased_fields(underlying).json_dumps())
@@ -268,7 +253,7 @@ def convert(job, packages=frozenset(), ports=frozenset()):
   return JobConfiguration(
       key=key,
       owner=owner,
-      cronSchedule=cron_schedule,
-      cronCollisionPolicy=cron_policy,
+      cronSchedule=not_empty_or(job.cron_schedule(), None),
+      cronCollisionPolicy=select_cron_policy(job.cron_collision_policy()),
       taskConfig=task,
       instanceCount=fully_interpolated(job.instances()))

@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,12 +14,13 @@
 
 import threading
 
+from mesos.interface.mesos_pb2 import TaskState
+
 from apache.aurora.executor.common.status_checker import (
     ChainedStatusChecker,
-    ExitState,
     Healthy,
     StatusChecker,
-    StatusResult,
+    StatusResult
 )
 
 
@@ -63,11 +62,11 @@ def test_chained_health_interface():
     assert si.started.is_set()
 
   assert chained_si.status is None
-  reason = StatusResult('derp', ExitState.FAILED)
+  reason = StatusResult('derp', TaskState.Value('TASK_FAILED'))
   si2.set_status(reason)
   assert chained_si.status == reason
   assert chained_si.status.reason == 'derp'
-  assert chained_si.status.status == ExitState.FAILED
+  assert TaskState.Name(chained_si.status.status) == 'TASK_FAILED'
 
   for si in (si1, si2):
     assert not si.stopped.is_set()

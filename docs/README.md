@@ -1,20 +1,37 @@
-# Overview
+## Introduction
+Apache Aurora is a service scheduler that runs on top of Apache Mesos, enabling you to run long-running services that take advantage of Apache Mesos' scalability, fault-tolerance, and resource isolation. This documentation has been organized into sections with three audiences in mind:
+ 
+ * Users: General information about the project and to learn how to run an Aurora job.
+ * Operators: For those that wish to manage and fine-tune an Aurora cluster.
+ * Developers: All the information you need to start modifying Aurora and contributing back to the project.
 
-*Aurora* is a service scheduler that schedules jobs onto *Mesos*, which runs tasks at a specified cluster. Typical services consist of up to hundreds of task replicas.
+We encourage you to ask questions on the [Aurora developer list](http://aurora.apache.org/community/) or the `#aurora` IRC channel on `irc.freenode.net`.
 
-Aurora provides a *Job* abstraction consisting of a *Task* template and instructions for creating near-identical replicas of that Task (modulo things like "instance id" or specific port numbers which may differ from machine to machine).
+## Users
+ * [Install Aurora on virtual machines on your private machine](vagrant.md)
+ * [Hello World Tutorial](tutorial.md)
+ * [User Guide](user-guide.md)
+ * [Configuration Tutorial](configuration-tutorial.md)
+ * [Aurora + Thermos Reference](configuration-reference.md)
+ * [Command Line Client](client-commands.md)
+ * [Cron Jobs](cron-jobs.md)
 
-*Terminology Note*: *Replicas* are also referred to as *shards* and *instances*. While there is a general desire to move to using "instances", "shard" is still found in commands and help strings.
+## Operators
+ * [Deploy Aurora](deploying-aurora-scheduler.md)
+ * [Monitoring](monitoring.md)
+ * [Hooks for Aurora Client API](hooks.md)
+ * [Scheduler Storage](storage.md)
+ * [Scheduler Storage and Maintenance](storage-config.md)
+ * [SLA Measurement](sla.md)
+ * [Resource Isolation and Sizing](resource-isolation.md)
+ * [Generating test resources](test-resource-generation.md)
 
-Typically a Task is a single *Process* corresponding to a single command line, such as `python2.6 my_script.py`. However, sometimes you must colocate separate Processes together within a single Task, which runs within a single container and `chroot`, often referred to as a "sandbox". For example, if you run multiple cooperating agents together such as `logrotate`, `installer`, and master or slave processes. *Thermos* provides a Process abstraction under the Mesos Tasks.
-
-To use and get up to speed on Aurora, you should look the docs in this directory in this order:
-
-1. How to [deploy Aurora](deploying-aurora-scheduler.md) or, how to [install Aurora on virtual machines on your private machine](vagrant.md) (the Tutorial uses the virtual machine approach).
-2. As a user, get started quickly with a [Tutorial](tutorial.md).
-3. For an overview of Aurora's process flow under the hood, see the [User Guide](userguide.md).
-4. To learn how to write a configuration file, look at our [Configuration Tutorial](configurationtutorial.md). From there, look at the [Aurora + Thermos Reference](configurationreference.md).
-5. Then read up on the [Aurora Command Line Client](clientcommands.md).
-6. Find out general information and useful tips about how Aurora does [Resource Isolation](resourceisolation.md).
-
-To contact the Aurora Developer List, email [dev@aurora.incubator.apache.org](mailto:dev@aurora.incubator.apache.org). You may want to read the list [archives](http://mail-archives.apache.org/mod_mbox/incubator-aurora-dev/). You can also use the IRC channel `#aurora` on `irc.freenode.net`
+## Developers
+ * [Contributing to the project](../CONTRIBUTING.md)
+ * [Developing the Aurora Scheduler](developing-aurora-scheduler.md)
+ * [Developing the Aurora Client](developing-aurora-client.md)
+ * [Committers Guide](committers.md)
+ * [Build System](build-system.md)
+ 
+## Additional Resources
+ * [Presentation videos and slides](presentations.md)

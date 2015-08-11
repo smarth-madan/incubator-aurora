@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,16 +12,28 @@
 # limitations under the License.
 #
 
-from math import ceil
 import unittest
+from math import ceil
+
+import mox
 
 from apache.aurora.client.api.health_check import HealthCheck
 from apache.aurora.client.api.instance_watcher import InstanceWatcher
 
-from gen.apache.aurora.ttypes import *
-from gen.apache.aurora.AuroraSchedulerManager import Client as scheduler_client
-
-import mox
+from gen.apache.aurora.api.AuroraSchedulerManager import Client as scheduler_client
+from gen.apache.aurora.api.ttypes import (
+    AssignedTask,
+    JobKey,
+    Response,
+    ResponseCode,
+    ResponseDetail,
+    Result,
+    ScheduledTask,
+    ScheduleStatus,
+    ScheduleStatusResult,
+    TaskConfig,
+    TaskQuery
+)
 
 
 class FakeClock(object):
@@ -37,6 +47,21 @@ class FakeClock(object):
     self._now_seconds += seconds
 
 
+class FakeEvent(object):
+  def __init__(self, clock):
+    self._clock = clock
+    self._is_set = False
+
+  def wait(self, seconds):
+    self._clock.sleep(seconds)
+
+  def is_set(self):
+    return self._is_set
+
+  def set(self):
+    self._is_set = True
+
+
 def find_expected_cycles(period, sleep_secs):
   return ceil(period / sleep_secs) + 1
 
@@ -47,25 +72,22 @@ class InstanceWatcherTest(unittest.TestCase):
   EXPECTED_CYCLES = find_expected_cycles(WATCH_SECS, 3.0)
 
   def setUp(self):
-    self._role = 'mesos'
-    self._env = 'test'
-    self._name = 'jimbob'
     self._clock = FakeClock()
+    self._event = FakeEvent(self._clock)
     self._scheduler = mox.MockObject(scheduler_client)
-    job_key = JobKey(name=self._name, environment=self._env, role=self._role)
+    self._job_key = JobKey(role='mesos', name='jimbob', environment='test')
     self._health_check = mox.MockObject(HealthCheck)
     self._watcher = InstanceWatcher(self._scheduler,
-                                 job_key,
+                                 self._job_key,
                                  self.RESTART_THRESHOLD,
                                  self.WATCH_SECS,
                                  health_check_interval_seconds=3,
-                                 clock=self._clock)
+                                 clock=self._clock,
+                                 terminating_event=self._event)
 
   def get_tasks_status_query(self, instance_ids):
     query = TaskQuery()
-    query.owner = Identity(role=self._role)
-    query.environment = self._env
-    query.jobName = self._name
+    query.jobKeys = set([self._job_key])
     query.statuses = set([ScheduleStatus.RUNNING])
     query.instanceIds = set(instance_ids)
     return query
@@ -76,36 +98,34 @@ class InstanceWatcherTest(unittest.TestCase):
 
   def expect_get_statuses(self, instance_ids=WATCH_INSTANCES, num_calls=EXPECTED_CYCLES):
     tasks = [self.create_task(instance_id) for instance_id in instance_ids]
-    response = Response(responseCode=ResponseCode.OK, message='test')
-    response.result = Result()
-    response.result.scheduleStatusResult = ScheduleStatusResult(tasks=tasks)
+    response = Response(
+        responseCode=ResponseCode.OK,
+        details=[ResponseDetail(message='test')],
+        result=Result(scheduleStatusResult=ScheduleStatusResult(tasks=tasks)))
 
     query = self.get_tasks_status_query(instance_ids)
-    for x in range(int(num_calls)):
-      self._scheduler.getTasksStatus(query).AndReturn(response)
+    for _ in range(int(num_calls)):
+      self._scheduler.getTasksWithoutConfigs(query).AndReturn(response)
 
-  def expect_io_error_in_get_statuses(self, instance_ids=WATCH_INSTANCES, num_calls=EXPECTED_CYCLES):
-    tasks = [self.create_task(instance_id) for instance_id in instance_ids]
-    response = Response(responseCode=ResponseCode.OK, message='test')
-    response.result = Result()
-    response.result.scheduleStatusResult = ScheduleStatusResult(tasks=tasks)
+  def expect_io_error_in_get_statuses(self, instance_ids=WATCH_INSTANCES,
+      num_calls=EXPECTED_CYCLES):
 
     query = self.get_tasks_status_query(instance_ids)
-    for x in range(int(num_calls)):
-      self._scheduler.getTasksStatus(query).AndRaise(IOError('oops'))
-
+    for _ in range(int(num_calls)):
+      self._scheduler.getTasksWithoutConfigs(query).AndRaise(IOError('oops'))
 
   def mock_health_check(self, task, status, retry):
     self._health_check.health(task).InAnyOrder().AndReturn((status, retry))
 
   def expect_health_check(self, instance, status, retry=True, num_calls=EXPECTED_CYCLES):
-    for x in range(int(num_calls)):
+    for _ in range(int(num_calls)):
       self.mock_health_check(self.create_task(instance), status, retry)
 
   def assert_watch_result(self, expected_failed_instances, instances_to_watch=WATCH_INSTANCES):
     instances_returned = self._watcher.watch(instances_to_watch, self._health_check)
     assert set(expected_failed_instances) == instances_returned, (
-        'Expected instances (%s) : Returned instances (%s)' % (expected_failed_instances, instances_returned))
+        'Expected instances (%s) : Returned instances (%s)' % (
+            expected_failed_instances, instances_returned))
 
   def replay_mocks(self):
     mox.Replay(self._scheduler)
@@ -143,7 +163,6 @@ class InstanceWatcherTest(unittest.TestCase):
     self.replay_mocks()
     self.assert_watch_result([0, 1, 2])
     self.verify_mocks()
-
 
   def test_all_instance_failure(self):
     """All failed instance in a batch of instances"""
@@ -201,4 +220,12 @@ class InstanceWatcherTest(unittest.TestCase):
     self.expect_health_check(2, False, num_calls=1)
     self.replay_mocks()
     self.assert_watch_result([2])
+    self.verify_mocks()
+
+  def test_terminated_exits_immediately(self):
+    """Terminated instance watched should bail out immediately."""
+    self.replay_mocks()
+    self._watcher.terminate()
+    result = self._watcher.watch([], self._health_check)
+    assert result is None, ('Expected instances None : Returned instances (%s)' % result)
     self.verify_mocks()

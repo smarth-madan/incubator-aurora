@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,8 +14,6 @@
 package org.apache.aurora.scheduler.app;
 
 import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.util.Arrays;
 import java.util.concurrent.Callable;
@@ -36,7 +32,8 @@ import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
-import com.google.common.net.HostAndPort;
+import com.google.common.hash.Hashing;
+import com.google.common.io.Files;
 import com.google.common.testing.TearDown;
 import com.google.common.util.concurrent.Atomics;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
@@ -50,9 +47,9 @@ import com.twitter.common.application.StartupStage;
 import com.twitter.common.application.modules.AppLauncherModule;
 import com.twitter.common.application.modules.LifecycleModule;
 import com.twitter.common.base.ExceptionalCommand;
-import com.twitter.common.io.FileUtils;
 import com.twitter.common.net.pool.DynamicHostSet.HostChangeMonitor;
 import com.twitter.common.quantity.Amount;
+import com.twitter.common.quantity.Data;
 import com.twitter.common.quantity.Time;
 import com.twitter.common.stats.Stats;
 import com.twitter.common.util.concurrent.ExecutorServiceShutdown;
@@ -62,12 +59,12 @@ import com.twitter.common.zookeeper.ZooKeeperClient;
 import com.twitter.common.zookeeper.guice.client.ZooKeeperClientModule;
 import com.twitter.common.zookeeper.guice.client.ZooKeeperClientModule.ClientConfig;
 import com.twitter.common.zookeeper.testing.BaseZooKeeperTest;
-import com.twitter.thrift.Endpoint;
 import com.twitter.thrift.ServiceInstance;
 
 import org.apache.aurora.codec.ThriftBinaryCodec.CodingException;
 import org.apache.aurora.gen.AssignedTask;
 import org.apache.aurora.gen.Identity;
+import org.apache.aurora.gen.JobKey;
 import org.apache.aurora.gen.ScheduleStatus;
 import org.apache.aurora.gen.ScheduledTask;
 import org.apache.aurora.gen.TaskConfig;
@@ -79,32 +76,39 @@ import org.apache.aurora.gen.storage.SaveTasks;
 import org.apache.aurora.gen.storage.Snapshot;
 import org.apache.aurora.gen.storage.Transaction;
 import org.apache.aurora.gen.storage.storageConstants;
-import org.apache.aurora.scheduler.DriverFactory;
-import org.apache.aurora.scheduler.MesosTaskFactory.ExecutorConfig;
+import org.apache.aurora.scheduler.Resources;
 import org.apache.aurora.scheduler.configuration.ConfigurationManager;
 import org.apache.aurora.scheduler.log.Log;
 import org.apache.aurora.scheduler.log.Log.Entry;
 import org.apache.aurora.scheduler.log.Log.Position;
 import org.apache.aurora.scheduler.log.Log.Stream;
+import org.apache.aurora.scheduler.mesos.DriverFactory;
+import org.apache.aurora.scheduler.mesos.DriverSettings;
+import org.apache.aurora.scheduler.mesos.ExecutorSettings;
 import org.apache.aurora.scheduler.storage.backup.BackupModule;
-import org.apache.aurora.scheduler.storage.log.LogManager.StreamManager.EntrySerializer;
+import org.apache.aurora.scheduler.storage.log.EntrySerializer;
 import org.apache.aurora.scheduler.storage.log.LogStorageModule;
 import org.apache.aurora.scheduler.storage.log.SnapshotStoreImpl;
 import org.apache.aurora.scheduler.storage.log.testing.LogOpMatcher;
 import org.apache.aurora.scheduler.storage.log.testing.LogOpMatcher.StreamMatcher;
-import org.apache.aurora.scheduler.thrift.ThriftConfiguration;
 import org.apache.mesos.Protos.FrameworkID;
 import org.apache.mesos.Protos.MasterInfo;
 import org.apache.mesos.Protos.Status;
 import org.apache.mesos.Scheduler;
 import org.apache.mesos.SchedulerDriver;
+import org.easymock.Capture;
 import org.easymock.EasyMock;
 import org.easymock.IAnswer;
 import org.easymock.IMocksControl;
 import org.junit.Before;
 import org.junit.Test;
 
+import static com.twitter.common.testing.easymock.EasyMockTest.createCapture;
+
+import static org.apache.mesos.Protos.FrameworkInfo;
+import static org.easymock.EasyMock.capture;
 import static org.easymock.EasyMock.createControl;
+import static org.easymock.EasyMock.eq;
 import static org.easymock.EasyMock.expect;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -116,12 +120,21 @@ public class SchedulerIT extends BaseZooKeeperTest {
 
   private static final String CLUSTER_NAME = "integration_test_cluster";
   private static final String SERVERSET_PATH = "/fake/service/path";
+  private static final String STATS_URL_PREFIX = "fake_url";
   private static final String FRAMEWORK_ID = "integration_test_framework_id";
+
+  private static final DriverSettings SETTINGS = new DriverSettings(
+      "fakemaster",
+      Optional.absent(),
+      FrameworkInfo.newBuilder()
+          .setUser("framework user")
+          .setName("test framework")
+          .build());
 
   private ExecutorService executor = Executors.newCachedThreadPool(
       new ThreadFactoryBuilder().setNameFormat("SchedulerIT-%d").setDaemon(true).build());
   private AtomicReference<Optional<RuntimeException>> mainException =
-      Atomics.newReference(Optional.<RuntimeException>absent());
+      Atomics.newReference(Optional.absent());
 
   private IMocksControl control;
   private Injector injector;
@@ -150,7 +163,7 @@ public class SchedulerIT extends BaseZooKeeperTest {
         control.verify();
       }
     });
-    backupDir = FileUtils.createTempDir();
+    backupDir = Files.createTempDir();
     addTearDown(new TearDown() {
       @Override
       public void tearDown() throws Exception {
@@ -166,55 +179,55 @@ public class SchedulerIT extends BaseZooKeeperTest {
     log = control.createMock(Log.class);
     logStream = control.createMock(Stream.class);
     streamMatcher = LogOpMatcher.matcherFor(logStream);
-    entrySerializer = new EntrySerializer(LogStorageModule.MAX_LOG_ENTRY_SIZE.get());
+    entrySerializer = new EntrySerializer.EntrySerializerImpl(
+        LogStorageModule.MAX_LOG_ENTRY_SIZE.get(),
+        Hashing.md5());
 
     zkClient = createZkClient();
+  }
 
+  private void startScheduler() throws Exception {
+    // TODO(wfarner): Try to accomplish all this by subclassing SchedulerMain and actually using
+    // AppLauncher.
     Module testModule = new AbstractModule() {
       @Override
       protected void configure() {
         bind(DriverFactory.class).toInstance(driverFactory);
+        bind(DriverSettings.class).toInstance(SETTINGS);
         bind(Log.class).toInstance(log);
-        bind(ThriftConfiguration.class).toInstance(
-            new ThriftConfiguration() {
-              @Override
-              public Optional<? extends InputStream> getSslKeyStream() throws IOException {
-                return Optional.of(
-                    com.google.common.io.Resources.getResource(getClass(), "AuroraTestKeyStore")
-                        .openStream());
-              }
-
-              @Override
-              public int getServingPort() {
-                return 0;
-              }
-            }
-        );
-        bind(ExecutorConfig.class).toInstance(new ExecutorConfig("/executor/thermos"));
+        Resources executorOverhead = new Resources(
+            0.1,
+            Amount.of(1L, Data.MB),
+            Amount.of(0L, Data.MB),
+            0);
+        bind(ExecutorSettings.class)
+            .toInstance(ExecutorSettings.newBuilder()
+                .setExecutorPath("/executor/thermos")
+                .setThermosObserverRoot("/var/run/thermos")
+                .setExecutorOverhead(executorOverhead)
+                .build());
         install(new BackupModule(backupDir, SnapshotStoreImpl.class));
       }
     };
-
     ClientConfig zkClientConfig = ClientConfig
         .create(ImmutableList.of(InetSocketAddress.createUnresolved("localhost", getPort())))
         .withCredentials(ZooKeeperClient.digestCredentials("mesos", "mesos"));
+    final SchedulerMain main = SchedulerMain.class.newInstance();
     injector = Guice.createInjector(
         ImmutableList.<Module>builder()
-            .addAll(SchedulerMain.getModules(CLUSTER_NAME, SERVERSET_PATH, zkClientConfig))
+            .addAll(main.getModules(CLUSTER_NAME, SERVERSET_PATH, zkClientConfig, STATS_URL_PREFIX))
             .add(new LifecycleModule())
             .add(new AppLauncherModule())
             .add(new ZooKeeperClientModule(zkClientConfig))
             .add(testModule)
             .build()
     );
+    injector.injectMembers(main);
     lifecycle = injector.getInstance(Lifecycle.class);
-  }
 
-  private void startScheduler() throws Exception {
     injector.getInstance(Key.get(ExceptionalCommand.class, StartupStage.class)).execute();
 
     // Mimic AppLauncher running main.
-    final SchedulerMain main = injector.getInstance(SchedulerMain.class);
     executor.submit(new Runnable() {
       @Override
       public void run() {
@@ -235,19 +248,16 @@ public class SchedulerIT extends BaseZooKeeperTest {
     });
   }
 
-  private HostAndPort awaitSchedulerReady() throws Exception {
-    return executor.submit(new Callable<HostAndPort>() {
+  private void awaitSchedulerReady() throws Exception {
+    executor.submit(new Callable<Void>() {
       @Override
-      public HostAndPort call() throws Exception {
-        final AtomicReference<HostAndPort> thriftEndpoint = Atomics.newReference();
+      public Void call() throws Exception {
         ServerSet schedulerService = new ServerSetImpl(zkClient, SERVERSET_PATH);
         final CountDownLatch schedulerReady = new CountDownLatch(1);
         schedulerService.watch(new HostChangeMonitor<ServiceInstance>() {
           @Override
           public void onChange(ImmutableSet<ServiceInstance> hostSet) {
             if (!hostSet.isEmpty()) {
-              Endpoint endpoint = Iterables.getOnlyElement(hostSet).getServiceEndpoint();
-              thriftEndpoint.set(HostAndPort.fromParts(endpoint.getHost(), endpoint.getPort()));
               schedulerReady.countDown();
             }
           }
@@ -255,13 +265,13 @@ public class SchedulerIT extends BaseZooKeeperTest {
         // A timeout is used because certain types of assertion errors (mocks) will not surface
         // until the main test thread exits this body of code.
         assertTrue(schedulerReady.await(5L, TimeUnit.MINUTES));
-        return thriftEndpoint.get();
+        return null;
       }
     }).get();
   }
 
   private AtomicInteger curPosition = new AtomicInteger();
-  private class IntPosition implements Position {
+  private static class IntPosition implements Position {
     private final int pos;
 
     IntPosition(int pos) {
@@ -286,7 +296,7 @@ public class SchedulerIT extends BaseZooKeeperTest {
               @Override
               public byte[] contents() {
                 try {
-                  return entrySerializer.serialize(entry)[0];
+                  return Iterables.getFirst(entrySerializer.serialize(entry), null);
                 } catch (CodingException e) {
                   throw Throwables.propagate(e);
                 }
@@ -301,8 +311,10 @@ public class SchedulerIT extends BaseZooKeeperTest {
         .setStatus(status)
         .setTaskEvents(ImmutableList.of(new TaskEvent(100, status)))
         .setAssignedTask(new AssignedTask()
+            .setSlaveId("slaveId")
             .setTaskId(id)
             .setTask(new TaskConfig()
+                .setJob(new JobKey("role-" + id, "test", "job-" + id))
                 .setJobName("job-" + id)
                 .setEnvironment("test")
                 .setExecutorConfig(new org.apache.aurora.gen.ExecutorConfig("AuroraExecutor", ""))
@@ -314,7 +326,13 @@ public class SchedulerIT extends BaseZooKeeperTest {
 
   @Test
   public void testLaunch() throws Exception {
-    expect(driverFactory.apply(null)).andReturn(driver).anyTimes();
+    Capture<Scheduler> scheduler = createCapture();
+    expect(driverFactory.create(
+        capture(scheduler),
+        eq(SETTINGS.getCredentials()),
+        eq(SETTINGS.getFrameworkInfo()),
+        eq(SETTINGS.getMasterUri())))
+        .andReturn(driver).anyTimes();
 
     ScheduledTask snapshotTask = makeTask("snapshotTask", ScheduleStatus.ASSIGNED);
     ScheduledTask transactionTask = makeTask("transactionTask", ScheduleStatus.RUNNING);
@@ -328,7 +346,7 @@ public class SchedulerIT extends BaseZooKeeperTest {
     expect(logStream.readAll()).andReturn(recoveredEntries.iterator()).anyTimes();
     // An empty saveTasks is an artifact of the fact that mutateTasks always writes a log operation
     // even if nothing is changed.
-    streamMatcher.expectTransaction(Op.saveTasks(new SaveTasks(ImmutableSet.<ScheduledTask>of())))
+    streamMatcher.expectTransaction(Op.saveTasks(new SaveTasks(ImmutableSet.of())))
         .andReturn(nextPosition());
     streamMatcher.expectTransaction(Op.saveFrameworkId(new SaveFrameworkId(FRAMEWORK_ID)))
         .andReturn(nextPosition());
@@ -363,7 +381,7 @@ public class SchedulerIT extends BaseZooKeeperTest {
     startScheduler();
 
     driverStarted.await();
-    injector.getInstance(Scheduler.class).registered(driver,
+    scheduler.getValue().registered(driver,
         FrameworkID.newBuilder().setValue(FRAMEWORK_ID).build(),
         MasterInfo.getDefaultInstance());
 
@@ -372,7 +390,6 @@ public class SchedulerIT extends BaseZooKeeperTest {
     assertEquals(0L, Stats.<Long>getVariable("task_store_PENDING").read().longValue());
     assertEquals(1L, Stats.<Long>getVariable("task_store_ASSIGNED").read().longValue());
     assertEquals(1L, Stats.<Long>getVariable("task_store_RUNNING").read().longValue());
-    assertEquals(0L, Stats.<Long>getVariable("task_store_UNKNOWN").read().longValue());
 
     // TODO(William Farner): Send a thrift RPC to the scheduler.
     // TODO(William Farner): Also send an admin thrift RPC to verify capability (e.g. ROOT) mapping.

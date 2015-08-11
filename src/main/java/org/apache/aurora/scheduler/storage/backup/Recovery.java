@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -39,7 +37,7 @@ import org.apache.aurora.scheduler.storage.Storage.MutableStoreProvider;
 import org.apache.aurora.scheduler.storage.Storage.MutateWork;
 import org.apache.aurora.scheduler.storage.entities.IScheduledTask;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
 
 /**
  * A recovery mechanism that works with {@link StorageBackup} to provide a two-step storage
@@ -69,7 +67,7 @@ public interface Recovery {
    * @return Tasks matching the query.
    * @throws RecoveryException If a backup is not staged, or could not be queried.
    */
-  Set<IScheduledTask> query(Query.Builder query) throws RecoveryException;
+  Iterable<IScheduledTask> query(Query.Builder query) throws RecoveryException;
 
   /**
    * Deletes tasks from a staged backup.
@@ -95,12 +93,12 @@ public interface Recovery {
    * Thrown when a recovery operation could not be completed due to internal errors or improper
    * invocation order.
    */
-  public static class RecoveryException extends Exception {
-    RecoveryException(String message) {
+  class RecoveryException extends RuntimeException {
+    public RecoveryException(String message) {
       super(message);
     }
 
-    RecoveryException(String message, Throwable cause) {
+    public RecoveryException(String message, Throwable cause) {
       super(message, cause);
     }
   }
@@ -121,12 +119,12 @@ public interface Recovery {
         DistributedSnapshotStore distributedStore,
         Command shutDownNow) {
 
-      this.backupDir = checkNotNull(backupDir);
-      this.tempStorageFactory = checkNotNull(tempStorageFactory);
+      this.backupDir = requireNonNull(backupDir);
+      this.tempStorageFactory = requireNonNull(tempStorageFactory);
       this.recovery = Atomics.newReference();
-      this.primaryStorage = checkNotNull(primaryStorage);
-      this.distributedStore = checkNotNull(distributedStore);
-      this.shutDownNow = checkNotNull(shutDownNow);
+      this.primaryStorage = requireNonNull(primaryStorage);
+      this.distributedStore = requireNonNull(distributedStore);
+      this.shutDownNow = requireNonNull(shutDownNow);
     }
 
     @Override
@@ -165,7 +163,7 @@ public interface Recovery {
     }
 
     @Override
-    public Set<IScheduledTask> query(Query.Builder query) throws RecoveryException {
+    public Iterable<IScheduledTask> query(Query.Builder query) throws RecoveryException {
       return getLoadedRecovery().query(query);
     }
 
@@ -194,7 +192,7 @@ public interface Recovery {
       void commit() {
         primaryStorage.write(new MutateWork.NoResult.Quiet() {
           @Override
-          protected void execute(MutableStoreProvider storeProvider) {
+          public void execute(MutableStoreProvider storeProvider) {
             try {
               distributedStore.persist(tempStorage.toSnapshot());
               shutDownNow.execute();
@@ -205,7 +203,7 @@ public interface Recovery {
         });
       }
 
-      Set<IScheduledTask> query(final Query.Builder query) {
+      Iterable<IScheduledTask> query(final Query.Builder query) {
         return tempStorage.fetchTasks(query);
       }
 

@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,6 +14,7 @@
 package org.apache.aurora.scheduler.http;
 
 import java.util.Map;
+import java.util.Objects;
 
 import javax.inject.Inject;
 import javax.ws.rs.GET;
@@ -27,7 +26,6 @@ import javax.ws.rs.core.Response;
 
 import com.google.common.base.Function;
 import com.google.common.base.Optional;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 
@@ -47,7 +45,7 @@ public class Quotas {
 
   @Inject
   Quotas(Storage storage) {
-    this.storage = Preconditions.checkNotNull(storage);
+    this.storage = Objects.requireNonNull(storage);
   }
 
   /**
@@ -57,8 +55,8 @@ public class Quotas {
    */
   @GET
   @Produces(MediaType.APPLICATION_JSON)
-  public Response getOffers(@QueryParam("role") final String role) {
-    return storage.weaklyConsistentRead(new Work.Quiet<Response>() {
+  public Response getQuotas(@QueryParam("role") final String role) {
+    return storage.read(new Work.Quiet<Response>() {
       @Override
       public Response apply(StoreProvider storeProvider) {
         Map<String, IResourceAggregate> quotas;
@@ -91,7 +89,7 @@ public class Quotas {
     private final long ramMb;
     private final long diskMb;
 
-    private ResourceAggregateBean(double cpu, long ramMb, long diskMb) {
+    ResourceAggregateBean(double cpu, long ramMb, long diskMb) {
       this.cpu = cpu;
       this.ramMb = ramMb;
       this.diskMb = diskMb;

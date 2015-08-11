@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -17,13 +15,13 @@
 import functools
 import traceback
 
-from apache.aurora.client.api import AuroraClientAPI
-from apache.aurora.client.config import GlobalHookRegistry
-from apache.aurora.common.aurora_job_key import AuroraJobKey
-
-from gen.apache.aurora.ttypes import ResponseCode
-
 from twitter.common import log
+
+from apache.aurora.client.api import AuroraClientAPI
+from apache.aurora.client.base import combine_messages
+from apache.aurora.client.config import GlobalHookRegistry
+
+from gen.apache.aurora.api.ttypes import ResponseCode
 
 
 def _partial(function, *args, **kw):
@@ -87,7 +85,7 @@ class HookedAuroraClientAPI(NonHookedAuroraClientAPI):
     def __str__(self):
       return '%s: %s: %s' % (self.__class__.__name__,
           ResponseCode._VALUES_TO_NAMES.get(self.response.responseCode, 'UNKNOWN'),
-          self.response.message)
+          combine_messages(self.response))
 
   @classmethod
   def _meta_hook(cls, hook, hook_method):
@@ -183,4 +181,10 @@ class HookedAuroraClientAPI(NonHookedAuroraClientAPI):
   def update_job(self, config, health_check_interval_seconds=3, instances=None):
     return self._hooked_call(config, None,
         _partial(super(HookedAuroraClientAPI, self).update_job,
-            config, health_check_interval_seconds=health_check_interval_seconds, instances=instances))
+            config, health_check_interval_seconds=health_check_interval_seconds,
+            instances=instances))
+
+  def start_job_update(self, config, message, instances=None):
+    return self._hooked_call(config, None,
+        _partial(super(HookedAuroraClientAPI, self).start_job_update,
+            config, message, instances=instances))

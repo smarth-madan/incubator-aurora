@@ -1,6 +1,4 @@
 /**
- * Copyright 2014 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,9 +13,13 @@
  */
 package org.apache.aurora.scheduler.state;
 
-import com.google.common.base.Objects;
+import java.util.Objects;
+
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
+
+import static org.apache.aurora.scheduler.state.StateChangeResult.ILLEGAL_WITH_SIDE_EFFECTS;
+import static org.apache.aurora.scheduler.state.StateChangeResult.SUCCESS;
 
 /**
  * The actions that should be performed in response to a state transition attempt.
@@ -25,22 +27,27 @@ import com.google.common.collect.ImmutableSet;
  * {@see TaskStateMachine}
  */
 public class TransitionResult {
-  private final boolean success;
+  private final StateChangeResult result;
   private final ImmutableSet<SideEffect> sideEffects;
 
   /**
    * Creates a transition result with the given side effects.
    *
-   * @param success Whether the transition attempt relevant to this result was successful.
+   * @param result Transition attempt result.
    * @param sideEffects Actions that must be performed in response to the state transition.
    */
-  public TransitionResult(boolean success, ImmutableSet<SideEffect> sideEffects) {
-    this.success = success;
-    this.sideEffects = Preconditions.checkNotNull(sideEffects);
+  public TransitionResult(StateChangeResult result, ImmutableSet<SideEffect> sideEffects) {
+    this.result = result;
+    this.sideEffects = Objects.requireNonNull(sideEffects);
+    if (!this.sideEffects.isEmpty()) {
+      Preconditions.checkArgument(
+          result == SUCCESS || result == ILLEGAL_WITH_SIDE_EFFECTS,
+          "Invalid transition result for a non-empty set of side effects");
+    }
   }
 
-  public boolean isSuccess() {
-    return success;
+  public StateChangeResult getResult() {
+    return result;
   }
 
   public ImmutableSet<SideEffect> getSideEffects() {
@@ -54,19 +61,19 @@ public class TransitionResult {
     }
 
     TransitionResult other = (TransitionResult) o;
-    return (success == other.success)
-        && Objects.equal(sideEffects, other.sideEffects);
+    return Objects.equals(result, other.result)
+        && Objects.equals(sideEffects, other.sideEffects);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hashCode(success, sideEffects);
+    return Objects.hash(result, sideEffects);
   }
 
   @Override
   public String toString() {
-    return Objects.toStringHelper(this)
-        .add("success", success)
+    return com.google.common.base.Objects.toStringHelper(this)
+        .add("result", result)
         .add("sideEffects", sideEffects)
         .toString();
   }

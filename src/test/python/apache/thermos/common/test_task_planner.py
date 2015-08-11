@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -15,22 +13,25 @@
 #
 
 import pytest
-from twitter.common.testing.clock import ThreadedClock
+
 from apache.thermos.common.planner import TaskPlanner
-from apache.thermos.config.schema import *
+from apache.thermos.config.schema import Constraint, Process, Task
+
+p1 = Process(name="p1", cmdline="")
+p2 = Process(name="p2", cmdline="")
+p3 = Process(name="p3", cmdline="")
+
+unordered_task = Task(name="unordered", processes=[p1, p2, p3])
+ordered_task = unordered_task(constraints=[{'order': ['p1', 'p2', 'p3']}])
+empty_task = Task(name="empty", processes=[])
 
 
-p1 = Process(name = "p1", cmdline = "")
-p2 = Process(name = "p2", cmdline = "")
-p3 = Process(name = "p3", cmdline = "")
-
-unordered_task = Task(name = "unordered", processes = [p1, p2, p3])
-ordered_task = unordered_task(constraints = [{'order': ['p1', 'p2', 'p3']}])
-empty_task = Task(name = "empty", processes = [])
-
-def _(*processes):
+def _(*processes):  # noqa
   return set(processes)
+
+
 empty = set()
+
 
 def approx_equal(a, b):
   return abs(a - b) < 0.001
@@ -205,7 +206,7 @@ def test_task_waits():
 
 def test_task_fails():
   dt = p1(max_failures=1, min_duration=1)
-  p = TaskPlanner(empty_task(processes = [dt(name='d1'), dt(name='d2')]))
+  p = TaskPlanner(empty_task(processes=[dt(name='d1'), dt(name='d2')]))
   assert p.runnable_at(timestamp=0) == _('d1', 'd2')
   p.set_running('d1')
   p.set_running('d2')
@@ -215,7 +216,7 @@ def test_task_fails():
   assert p.runnable_at(timestamp=0) == empty
   assert p.min_wait(timestamp=0) == TaskPlanner.INFINITY
 
-  p = TaskPlanner(empty_task(processes = [dt(name='d1'), dt(name='d2')]))
+  p = TaskPlanner(empty_task(processes=[dt(name='d1'), dt(name='d2')]))
   assert p.runnable_at(timestamp=0) == _('d1', 'd2')
   p.set_running('d1')
   p.set_failed('d1')
@@ -227,7 +228,7 @@ def test_task_fails():
   assert p.min_wait(timestamp=0) == TaskPlanner.INFINITY
 
   # test max_failures=0 && daemon==True ==> retries forever
-  p = TaskPlanner(empty_task(processes = [dt(name='d1', max_failures=0, daemon=True)]))
+  p = TaskPlanner(empty_task(processes=[dt(name='d1', max_failures=0, daemon=True)]))
   for k in range(10):
     p.set_running('d1')
     assert 'd1' in p.running
@@ -243,7 +244,7 @@ def test_task_fails():
     assert 'd1' not in p.failed
     assert 'd1' not in p.finished
 
-  p = TaskPlanner(empty_task(processes = [dt(name='d1', max_failures=0)]))
+  p = TaskPlanner(empty_task(processes=[dt(name='d1', max_failures=0)]))
   p.set_running('d1')
   assert 'd1' in p.running
   assert 'd1' not in p.failed
@@ -263,14 +264,14 @@ def test_task_lost():
   dt = p1(max_failures=2, min_duration=1)
 
   # regular success behavior
-  p = TaskPlanner(empty_task(processes = [dt(name='d1')]))
+  p = TaskPlanner(empty_task(processes=[dt(name='d1')]))
   assert p.runnable_at(timestamp=0) == _('d1')
   p.set_running('d1')
   p.add_success('d1', timestamp=0)
   assert p.min_wait(timestamp=0) == TaskPlanner.INFINITY
 
   # regular failure behavior
-  p = TaskPlanner(empty_task(processes = [dt(name='d1')]))
+  p = TaskPlanner(empty_task(processes=[dt(name='d1')]))
   assert p.runnable_at(timestamp=0) == _('d1')
   p.set_running('d1')
   p.add_failure('d1', timestamp=1)
@@ -280,7 +281,7 @@ def test_task_lost():
   assert p.min_wait(timestamp=3) == TaskPlanner.INFINITY
 
   # lost behavior
-  p = TaskPlanner(empty_task(processes = [dt(name='d1')]))
+  p = TaskPlanner(empty_task(processes=[dt(name='d1')]))
   assert p.runnable_at(timestamp=0) == _('d1')
   p.set_running('d1')
   p.add_failure('d1', timestamp=1)
@@ -295,18 +296,21 @@ def test_task_lost():
 
 def test_task_filters():
   t = p1
-  task = empty_task(processes = [t(name='p1'), t(name='p2'), t(name='p3'),
-                                 t(name='f1'), t(name='f2'), t(name='f3')],
-                    constraints = [Constraint(order=['p1','p2','p3']),
-                                   Constraint(order=['f1','f2','f3'])])
+  task = empty_task(
+      processes=[
+          t(name='p1'), t(name='p2'), t(name='p3'),
+          t(name='f1'), t(name='f2'), t(name='f3')],
+      constraints=[
+          Constraint(order=['p1', 'p2', 'p3']),
+          Constraint(order=['f1', 'f2', 'f3'])])
   assert TaskPlanner(task, process_filter=lambda proc: proc.name().get().startswith('p'))
   assert TaskPlanner(task, process_filter=lambda proc: proc.name().get().startswith('f'))
 
   with pytest.raises(TaskPlanner.InvalidSchedule):
-    TaskPlanner(task(constraints=[Constraint(order=['p1','f1'])]),
+    TaskPlanner(task(constraints=[Constraint(order=['p1', 'f1'])]),
                 process_filter=lambda proc: proc.name().get().startswith('p'))
   with pytest.raises(TaskPlanner.InvalidSchedule):
-    TaskPlanner(task(constraints=[Constraint(order=['p1','f1'])]),
+    TaskPlanner(task(constraints=[Constraint(order=['p1', 'f1'])]),
                 process_filter=lambda proc: proc.name().get().startswith('f'))
 
 
@@ -315,7 +319,7 @@ def test_task_max_runs():
     TOTAL_RUN_LIMIT = 2
   dt = p1(daemon=True, max_failures=0)
 
-  p = CappedTaskPlanner(empty_task(processes = [dt(name = 'd1', max_failures=100, daemon=False)]))
+  p = CappedTaskPlanner(empty_task(processes=[dt(name='d1', max_failures=100, daemon=False)]))
   p.set_running('d1')
   p.add_failure('d1', timestamp=1)
   assert 'd1' in p.runnable
@@ -323,7 +327,7 @@ def test_task_max_runs():
   p.add_failure('d1', timestamp=2)
   assert 'd1' not in p.runnable
 
-  p = CappedTaskPlanner(empty_task(processes = [dt(name = 'd1', max_failures=100)]))
+  p = CappedTaskPlanner(empty_task(processes=[dt(name='d1', max_failures=100)]))
   p.set_running('d1')
   p.add_failure('d1', timestamp=1)
   assert 'd1' in p.runnable

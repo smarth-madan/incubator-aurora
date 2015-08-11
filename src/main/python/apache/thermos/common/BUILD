@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,42 +14,15 @@
 
 import os
 
-python_library(
-  name = 'ckpt',
-  sources = ['ckpt.py'],
-  dependencies = [
-    pants('3rdparty/python:twitter.common.log'),
-    pants('3rdparty/python:twitter.common.recordio'),
-    pants('src/main/thrift/org/apache/thermos:py-thrift')
-  ]
-)
-
-python_library(
-  name = 'path',
-  sources = ['path.py'],
-)
-
-python_library(
-  name = 'planner',
-  sources = ['planner.py'],
-)
-
-python_library(
-  name = 'options',
-  sources = ['options.py'],
-  dependencies = [
-    pants('3rdparty/python:pystachio'),
-    pants('src/main/thrift/org/apache/thermos:py-thrift'),
-  ]
-)
 
 python_library(
   name = 'common',
+  sources = rglobs('*.py'),
   dependencies = [
-    pants(':ckpt'),
-    pants(':options'),
-    pants(':path'),
-    pants(':planner'),
+    '3rdparty/python:pystachio',
+    '3rdparty/python:twitter.common.log',
+    '3rdparty/python:twitter.common.recordio',
+    'api/src/main/thrift/org/apache/thermos'
   ],
   provides = setup_py(
     name = 'apache.thermos.common',

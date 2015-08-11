@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,26 +12,21 @@
 # limitations under the License.
 #
 
-from apache.thermos.config.schema import (
-  Task,
-  Resources,
-  Process)
+from apache.thermos.config.schema import Process, Task
 from apache.thermos.testing.runner import RunnerTestBase
-from gen.apache.thermos.ttypes import (
-  TaskState,
-  ProcessState
-)
+
+from gen.apache.thermos.ttypes import ProcessState, TaskState
 
 
 class TestEphemeralTask(RunnerTestBase):
   @classmethod
   def task(cls):
     task = Task(
-      name = "task_with_ephemeral",
-      processes = [
-        Process(name = "ephemeral_sleepy", ephemeral=True, cmdline="sleep 10"),
-        Process(name = "sleepy", cmdline="sleep 1")
-      ])
+        name="task_with_ephemeral",
+        processes=[
+          Process(name="ephemeral_sleepy", ephemeral=True, cmdline="sleep 10"),
+          Process(name="sleepy", cmdline="sleep 1")
+        ])
     return task.interpolate()[0]
 
   def test_runner_state(self):

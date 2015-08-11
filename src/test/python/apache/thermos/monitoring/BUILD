@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,14 +14,35 @@
 
 python_test_suite(name = 'all',
   dependencies = [
-    pants(':test_disk'),
+    ':test_disk',
+    ':test_detector',
+    ':test_resource',
   ]
 )
 
 python_tests(name = 'test_disk',
   sources = ['test_disk.py'],
   dependencies = [
-    pants('src/main/python/apache/thermos/monitoring:disk'),
+    'src/main/python/apache/thermos/monitoring',
+    '3rdparty/python:twitter.common.quantity',
   ]
 )
 
+python_tests(name = 'test_detector',
+  sources = ['test_detector.py'],
+  dependencies = [
+    '3rdparty/python:twitter.common.contextutil',
+    '3rdparty/python:twitter.common.dirutil',
+    'src/main/python/apache/thermos/common',
+    'src/main/python/apache/thermos/monitoring',
+  ]
+)
+
+python_tests(name = 'test_resource',
+  sources = ['test_resource.py'],
+  dependencies = [
+    '3rdparty/python:mock',
+    'src/main/python/apache/thermos/common',
+    'src/main/python/apache/thermos/monitoring',
+  ]
+)

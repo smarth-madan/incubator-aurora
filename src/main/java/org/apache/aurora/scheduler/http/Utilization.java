@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,8 +14,10 @@
 package org.apache.aurora.scheduler.http;
 
 import java.io.StringWriter;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
 
 import javax.annotation.Nullable;
 import javax.inject.Inject;
@@ -31,8 +31,6 @@ import javax.ws.rs.core.Response;
 import javax.ws.rs.core.Response.Status;
 
 import com.google.common.base.Function;
-import com.google.common.base.Objects;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.FluentIterable;
 import com.twitter.common.base.Closure;
 import com.twitter.common.base.MorePreconditions;
@@ -61,7 +59,7 @@ public class Utilization {
   @Inject
   Utilization(ResourceCounter counter, IServerInfo serverInfo) {
     templateHelper = new StringTemplateHelper(getClass(), "utilization", true);
-    this.counter = Preconditions.checkNotNull(counter);
+    this.counter = Objects.requireNonNull(counter);
     this.clusterName = MorePreconditions.checkNotBlank(serverInfo.getClusterName());
   }
 
@@ -104,7 +102,7 @@ public class Utilization {
 
     @Override
     public int hashCode() {
-      return Objects.hashCode(title, link);
+      return Objects.hash(title, link);
     }
 
     @Override
@@ -114,7 +112,7 @@ public class Utilization {
       }
 
       Display other = (Display) o;
-      return Objects.equal(title, other.title) && Objects.equal(link, other.link);
+      return Objects.equals(title, other.title) && Objects.equals(link, other.link);
     }
   }
 
@@ -133,6 +131,23 @@ public class Utilization {
     @Nullable
     public String getLink() {
       return display.link;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (!(o instanceof DisplayMetric)) {
+        return false;
+      }
+
+      DisplayMetric other = (DisplayMetric) o;
+
+      return super.equals(o)
+          && display.equals(other.display);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(super.hashCode(), display);
     }
   }
 
@@ -162,7 +177,7 @@ public class Utilization {
   }
 
   private MetricType getTypeByName(String name) throws WebApplicationException {
-    MetricType type = MetricType.valueOf(name.toUpperCase());
+    MetricType type = MetricType.valueOf(name.toUpperCase(Locale.ENGLISH));
     if (type == null) {
       throw new WebApplicationException(
           Response.status(Status.BAD_REQUEST).entity("Invalid metric type.").build());
@@ -185,7 +200,7 @@ public class Utilization {
     Function<ITaskConfig, Display> toKey = new Function<ITaskConfig, Display>() {
       @Override
       public Display apply(ITaskConfig task) {
-        String role = task.getOwner().getRole();
+        String role = task.getJob().getRole();
         return new Display(role, metric + "/" + role);
       }
     };

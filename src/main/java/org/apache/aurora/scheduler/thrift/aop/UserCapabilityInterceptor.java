@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -18,13 +16,13 @@ package org.apache.aurora.scheduler.thrift.aop;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.logging.Logger;
 
 import javax.inject.Inject;
 
 import com.google.common.base.Function;
 import com.google.common.base.Optional;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableList;
@@ -37,6 +35,7 @@ import org.apache.aurora.auth.CapabilityValidator.Capability;
 import org.apache.aurora.auth.SessionValidator.AuthFailedException;
 import org.apache.aurora.gen.ResponseCode;
 import org.apache.aurora.gen.SessionKey;
+import org.apache.aurora.scheduler.thrift.Responses;
 import org.apache.aurora.scheduler.thrift.auth.Requires;
 
 /**
@@ -60,7 +59,7 @@ class UserCapabilityInterceptor implements MethodInterceptor {
 
   @Override
   public Object invoke(MethodInvocation invocation) throws Throwable {
-    Preconditions.checkNotNull(capabilityValidator, "Session validator has not yet been set.");
+    Objects.requireNonNull(capabilityValidator, "Session validator has not yet been set.");
 
     // Ensure ROOT is always permitted.
     ImmutableList.Builder<Capability> whitelistBuilder =
@@ -97,8 +96,8 @@ class UserCapabilityInterceptor implements MethodInterceptor {
     }
 
     // User is not permitted to perform this operation.
-    return Interceptors.properlyTypedResponse(
-        method,
+    return Responses.addMessage(
+        Responses.empty(),
         ResponseCode.AUTH_FAILED,
         "Session identified by '" + key
             + "' does not have the required capability to perform this action: " + whitelist);

@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -19,26 +17,25 @@ import java.util.logging.Logger;
 
 import javax.inject.Inject;
 
-import org.apache.aurora.scheduler.stats.AsyncStatsModule.StatUpdater;
 import org.apache.aurora.scheduler.stats.ResourceCounter.GlobalMetric;
 import org.apache.aurora.scheduler.stats.ResourceCounter.Metric;
 import org.apache.aurora.scheduler.storage.Storage.StorageException;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static java.util.Objects.requireNonNull;
 
 /**
  * Calculates and exports aggregate stats about resources consumed by active tasks.
  */
 class TaskStatCalculator implements Runnable {
-  private static final Logger LOG = Logger.getLogger(StatUpdater.class.getName());
+  private static final Logger LOG = Logger.getLogger(TaskStatCalculator.class.getName());
 
   private final CachedCounters counters;
   private final ResourceCounter resourceCounter;
 
   @Inject
   TaskStatCalculator(ResourceCounter resourceCounter, CachedCounters counters) {
-    this.resourceCounter = checkNotNull(resourceCounter);
-    this.counters = checkNotNull(counters);
+    this.resourceCounter = requireNonNull(resourceCounter);
+    this.counters = requireNonNull(counters);
   }
 
   private void update(String prefix, Metric metric) {

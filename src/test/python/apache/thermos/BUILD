@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -17,10 +15,10 @@
 python_test_suite(
   name = 'all',
   dependencies = [
-    pants('src/test/python/apache/thermos/bin:all'),
-    pants('src/test/python/apache/thermos/common:all'),
-    pants('src/test/python/apache/thermos/config:all'),
-    pants('src/test/python/apache/thermos/core:all'),
-    pants('src/test/python/apache/thermos/monitoring:all'),
+    'src/test/python/apache/thermos/common:all',
+    'src/test/python/apache/thermos/config:all',
+    'src/test/python/apache/thermos/core:all',
+    'src/test/python/apache/thermos/cli:all',
+    'src/test/python/apache/thermos/monitoring:all',
   ]
 )

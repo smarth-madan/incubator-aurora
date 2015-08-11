@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,38 +13,41 @@
  */
 package org.apache.aurora.scheduler.configuration;
 
+import java.util.List;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
+import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
+import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import com.twitter.common.args.Arg;
+import com.twitter.common.args.CmdLine;
 import com.twitter.common.base.Closure;
-import com.twitter.common.base.MorePreconditions;
 
-import org.apache.aurora.gen.Constraint;
+import org.apache.aurora.gen.Container;
 import org.apache.aurora.gen.JobConfiguration;
-import org.apache.aurora.gen.LimitConstraint;
+import org.apache.aurora.gen.MesosContainer;
 import org.apache.aurora.gen.TaskConfig;
 import org.apache.aurora.gen.TaskConfig._Fields;
 import org.apache.aurora.gen.TaskConstraint;
 import org.apache.aurora.scheduler.base.JobKeys;
 import org.apache.aurora.scheduler.storage.entities.IConstraint;
+import org.apache.aurora.scheduler.storage.entities.IContainer;
 import org.apache.aurora.scheduler.storage.entities.IIdentity;
 import org.apache.aurora.scheduler.storage.entities.IJobConfiguration;
 import org.apache.aurora.scheduler.storage.entities.ITaskConfig;
 import org.apache.aurora.scheduler.storage.entities.ITaskConstraint;
 import org.apache.aurora.scheduler.storage.entities.IValueConstraint;
-import org.apache.commons.lang.StringUtils;
 
-import static org.apache.aurora.gen.apiConstants.DEFAULT_ENVIRONMENT;
 import static org.apache.aurora.gen.apiConstants.GOOD_IDENTIFIER_PATTERN_JVM;
 
 /**
@@ -57,10 +58,16 @@ import static org.apache.aurora.gen.apiConstants.GOOD_IDENTIFIER_PATTERN_JVM;
  */
 public final class ConfigurationManager {
 
-  public static final String DEDICATED_ATTRIBUTE = "dedicated";
+  @CmdLine(name = "allowed_container_types",
+      help = "Container types that are allowed to be used by jobs.")
+  private static final Arg<List<Container._Fields>> ALLOWED_CONTAINER_TYPES =
+      Arg.create(ImmutableList.of(Container._Fields.MESOS));
 
-  @VisibleForTesting public static final String HOST_CONSTRAINT = "host";
-  @VisibleForTesting public static final String RACK_CONSTRAINT = "rack";
+  @CmdLine(name = "allow_docker_parameters",
+      help = "Allow to pass docker container parameters in the job.")
+  private static final Arg<Boolean> ENABLE_DOCKER_PARAMETERS = Arg.create(false);
+
+  public static final String DEDICATED_ATTRIBUTE = "dedicated";
 
   private static final Pattern GOOD_IDENTIFIER = Pattern.compile(GOOD_IDENTIFIER_PATTERN_JVM);
 
@@ -129,33 +136,15 @@ public final class ConfigurationManager {
           new DefaultField(_Fields.PRIORITY, 0),
           new DefaultField(_Fields.PRODUCTION, false),
           new DefaultField(_Fields.MAX_TASK_FAILURES, 1),
-          new DefaultField(_Fields.TASK_LINKS, Maps.<String, String>newHashMap()),
-          new DefaultField(_Fields.REQUESTED_PORTS, Sets.<String>newHashSet()),
-          new DefaultField(_Fields.CONSTRAINTS, Sets.<Constraint>newHashSet()),
-          new DefaultField(_Fields.ENVIRONMENT, DEFAULT_ENVIRONMENT),
-          new Closure<TaskConfig>() {
-            @Override
-            public void execute(TaskConfig task) {
-              if (!Iterables.any(task.getConstraints(), hasName(HOST_CONSTRAINT))) {
-                task.addToConstraints(hostLimitConstraint(1));
-              }
-            }
-          },
-          new Closure<TaskConfig>() {
-            @Override
-            public void execute(TaskConfig task) {
-              if (!isDedicated(ITaskConfig.build(task))
-                  && task.isProduction()
-                  && task.isIsService()
-                  && !Iterables.any(task.getConstraints(), hasName(RACK_CONSTRAINT))) {
-
-                task.addToConstraints(rackLimitConstraint(1));
-              }
-            }
-          });
+          new DefaultField(_Fields.TASK_LINKS, Maps.newHashMap()),
+          new DefaultField(_Fields.REQUESTED_PORTS, Sets.newHashSet()),
+          new DefaultField(_Fields.CONSTRAINTS, Sets.newHashSet()),
+          // TODO(wfarner): Explore replacing these with thrift defaults.
+          new DefaultField(_Fields.CONTAINER,
+              Container.mesos(new MesosContainer())));
 
   private static final Iterable<RequiredFieldValidator<?>> REQUIRED_FIELDS_VALIDATORS =
-      ImmutableList.<RequiredFieldValidator<?>>of(
+      ImmutableList.of(
           new RequiredFieldValidator<>(_Fields.NUM_CPUS, new GreaterThan(0.0, "num_cpus")),
           new RequiredFieldValidator<>(_Fields.RAM_MB, new GreaterThan(0.0, "ram_mb")),
           new RequiredFieldValidator<>(_Fields.DISK_MB, new GreaterThan(0.0, "disk_mb")));
@@ -164,22 +153,28 @@ public final class ConfigurationManager {
     // Utility class.
   }
 
-  @VisibleForTesting
-  static boolean isGoodIdentifier(String identifier) {
-    return GOOD_IDENTIFIER.matcher(identifier).matches()
-        && (identifier.length() <= MAX_IDENTIFIER_LENGTH);
+  /**
+   * Verifies that an identifier is an acceptable name component.
+   *
+   * @param identifier Identifier to check.
+   * @return false if the identifier is null or invalid.
+   */
+  public static boolean isGoodIdentifier(@Nullable String identifier) {
+    return identifier != null
+        && GOOD_IDENTIFIER.matcher(identifier).matches()
+        && identifier.length() <= MAX_IDENTIFIER_LENGTH;
   }
 
-  private static void checkNotNull(Object value, String error) throws TaskDescriptionException {
+  private static void requireNonNull(Object value, String error) throws TaskDescriptionException {
     if (value == null) {
       throw new TaskDescriptionException(error);
     }
   }
 
   private static void assertOwnerValidity(IIdentity jobOwner) throws TaskDescriptionException {
-    checkNotNull(jobOwner, "No job owner specified!");
-    checkNotNull(jobOwner.getRole(), "No job role specified!");
-    checkNotNull(jobOwner.getUser(), "No job user specified!");
+    requireNonNull(jobOwner, "No job owner specified!");
+    requireNonNull(jobOwner.getRole(), "No job role specified!");
+    requireNonNull(jobOwner.getUser(), "No job user specified!");
 
     if (!isGoodIdentifier(jobOwner.getRole())) {
       throw new TaskDescriptionException(
@@ -200,8 +195,8 @@ public final class ConfigurationManager {
     return taskConstraint.getSetField() == TaskConstraint._Fields.VALUE;
   }
 
-  public static boolean isDedicated(ITaskConfig task) {
-    return Iterables.any(task.getConstraints(), getConstraintByName(DEDICATED_ATTRIBUTE));
+  public static boolean isDedicated(Iterable<IConstraint> taskConstraints) {
+    return Iterables.any(taskConstraints, getConstraintByName(DEDICATED_ATTRIBUTE));
   }
 
   @Nullable
@@ -221,48 +216,39 @@ public final class ConfigurationManager {
   public static IJobConfiguration validateAndPopulate(IJobConfiguration job)
       throws TaskDescriptionException {
 
-    Preconditions.checkNotNull(job);
+    Objects.requireNonNull(job);
 
     if (!job.isSetTaskConfig()) {
       throw new TaskDescriptionException("Job configuration must have taskConfig set.");
     }
 
     if (!job.isSetInstanceCount()) {
-      throw new TaskDescriptionException("Job configuration does not have shardCount set.");
+      throw new TaskDescriptionException("Job configuration does not have instanceCount set.");
     }
 
     if (job.getInstanceCount() <= 0) {
-      throw new TaskDescriptionException("Shard count must be positive.");
+      throw new TaskDescriptionException("Instance count must be positive.");
     }
 
     JobConfiguration builder = job.newBuilder();
 
-    assertOwnerValidity(job.getOwner());
-
     if (!JobKeys.isValid(job.getKey())) {
       throw new TaskDescriptionException("Job key " + job.getKey() + " is invalid.");
     }
-    if (!job.getKey().getRole().equals(job.getOwner().getRole())) {
-      throw new TaskDescriptionException("Role in job key must match job owner.");
-    }
-    if (!isGoodIdentifier(job.getKey().getRole())) {
-      throw new TaskDescriptionException(
-          "Job role contains illegal characters: " + job.getKey().getRole());
-    }
-    if (!isGoodIdentifier(job.getKey().getEnvironment())) {
-      throw new TaskDescriptionException(
-          "Job environment contains illegal characters: " + job.getKey().getEnvironment());
-    }
-    if (!isGoodIdentifier(job.getKey().getName())) {
-      throw new TaskDescriptionException(
-          "Job name contains illegal characters: " + job.getKey().getName());
+
+    if (job.isSetOwner()) {
+      assertOwnerValidity(job.getOwner());
+
+      if (!job.getKey().getRole().equals(job.getOwner().getRole())) {
+        throw new TaskDescriptionException("Role in job key must match job owner.");
+      }
     }
 
     builder.setTaskConfig(
         validateAndPopulate(ITaskConfig.build(builder.getTaskConfig())).newBuilder());
 
     // Only one of [service=true, cron_schedule] may be set.
-    if (!StringUtils.isEmpty(job.getCronSchedule()) && builder.getTaskConfig().isIsService()) {
+    if (!Strings.isNullOrEmpty(job.getCronSchedule()) && builder.getTaskConfig().isIsService()) {
       throw new TaskDescriptionException(
           "A service task may not be run on a cron schedule: " + builder);
     }
@@ -286,12 +272,10 @@ public final class ConfigurationManager {
     TaskConfig builder = config.newBuilder();
 
     if (!builder.isSetRequestedPorts()) {
-      builder.setRequestedPorts(ImmutableSet.<String>of());
+      builder.setRequestedPorts(ImmutableSet.of());
     }
 
     maybeFillLinks(builder);
-
-    assertOwnerValidity(config.getOwner());
 
     if (!isGoodIdentifier(config.getJobName())) {
       throw new TaskDescriptionException(
@@ -301,6 +285,27 @@ public final class ConfigurationManager {
     if (!isGoodIdentifier(config.getEnvironment())) {
       throw new TaskDescriptionException(
           "Environment contains illegal characters: " + config.getEnvironment());
+    }
+
+    if (config.isSetJob()) {
+      if (!JobKeys.isValid(config.getJob())) {
+        // Job key is set but invalid
+        throw new TaskDescriptionException("Job key " + config.getJob() + " is invalid.");
+      }
+
+      if (!config.getJob().getRole().equals(config.getOwner().getRole())) {
+        // Both owner and job key are set but don't match
+        throw new TaskDescriptionException("Role must match job owner.");
+      }
+    } else {
+      // TODO(maxim): Make sure both key and owner are populated to support older clients.
+      // Remove in 0.7.0. (AURORA-749).
+      // Job key is not set -> populate from owner, environment and name
+      assertOwnerValidity(config.getOwner());
+      builder.setJob(JobKeys.from(
+          config.getOwner().getRole(),
+          config.getEnvironment(),
+          config.getJobName()).newBuilder());
     }
 
     if (!builder.isSetExecutorConfig()) {
@@ -320,7 +325,7 @@ public final class ConfigurationManager {
 
       IValueConstraint valueConstraint = constraint.getConstraint().getValue();
 
-      if (!(valueConstraint.getValues().size() == 1)) {
+      if (valueConstraint.getValues().size() != 1) {
         throw new TaskDescriptionException("A dedicated constraint must have exactly one value");
       }
 
@@ -329,6 +334,32 @@ public final class ConfigurationManager {
         throw new TaskDescriptionException(
             "Only " + dedicatedRole + " may use hosts dedicated for that role.");
       }
+    }
+
+    Optional<Container._Fields> containerType;
+    if (config.isSetContainer()) {
+      IContainer containerConfig = config.getContainer();
+      containerType = Optional.of(containerConfig.getSetField());
+      if (containerConfig.isSetDocker()) {
+        if (!containerConfig.getDocker().isSetImage()) {
+          throw new TaskDescriptionException("A container must specify an image");
+        }
+        if (containerConfig.getDocker().isSetParameters()
+            && !containerConfig.getDocker().getParameters().isEmpty()
+            && !ENABLE_DOCKER_PARAMETERS.get()) {
+          throw new TaskDescriptionException("Docker parameters not allowed.");
+        }
+      }
+    } else {
+      // Default to mesos container type if unset.
+      containerType = Optional.of(Container._Fields.MESOS);
+    }
+    if (!containerType.isPresent()) {
+      throw new TaskDescriptionException("A job must have a container type.");
+    }
+    if (!ALLOWED_CONTAINER_TYPES.get().contains(containerType.get())) {
+      throw new TaskDescriptionException(
+          "The container type " + containerType.get().toString() + " is not allowed");
     }
 
     return ITaskConfig.build(applyDefaultsIfUnset(builder));
@@ -341,46 +372,18 @@ public final class ConfigurationManager {
    * @return A filter that matches the constraint.
    */
   public static Predicate<IConstraint> getConstraintByName(final String name) {
-    return new Predicate<IConstraint>() {
-      @Override
-      public boolean apply(IConstraint constraint) {
-        return constraint.getName().equals(name);
-      }
-    };
-  }
-
-  @VisibleForTesting
-  public static Constraint hostLimitConstraint(int limit) {
-    return new Constraint(HOST_CONSTRAINT, TaskConstraint.limit(new LimitConstraint(limit)));
-  }
-
-  @VisibleForTesting
-  public static Constraint rackLimitConstraint(int limit) {
-    return new Constraint(RACK_CONSTRAINT, TaskConstraint.limit(new LimitConstraint(limit)));
-  }
-
-  private static Predicate<Constraint> hasName(final String name) {
-    MorePreconditions.checkNotBlank(name);
-    return new Predicate<Constraint>() {
-      @Override
-      public boolean apply(Constraint constraint) {
-        return name.equals(constraint.getName());
-      }
-    };
+    return constraint -> constraint.getName().equals(name);
   }
 
   /**
    * Applies defaults to unset values in a task.
-   *
    * @param task Task to apply defaults to.
    * @return A reference to the (modified) {@code task}.
    */
-  @VisibleForTesting
   public static TaskConfig applyDefaultsIfUnset(TaskConfig task) {
     for (Closure<TaskConfig> populator : DEFAULT_FIELD_POPULATORS) {
       populator.execute(task);
     }
-
     return task;
   }
 

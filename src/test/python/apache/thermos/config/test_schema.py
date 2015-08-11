@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -15,23 +13,22 @@
 #
 
 import pytest
-
 from twitter.common.collections import OrderedDict
+
 from apache.thermos.config.schema import (
-  Constraint,
-  List,
-  Process,
-  Resources,
-  SequentialTask,
-  SimpleTask,
-  Task,
-  Tasks,
-  Units,
-  combine_tasks,
-  concat_tasks,
-  java_options,
-  order,
-  python_options,
+    Constraint,
+    Process,
+    Resources,
+    SequentialTask,
+    SimpleTask,
+    Task,
+    Tasks,
+    Units,
+    combine_tasks,
+    concat_tasks,
+    java_options,
+    order,
+    python_options
 )
 
 
@@ -51,6 +48,7 @@ def test_order():
 
   with pytest.raises(ValueError):
     order(None)
+
 
 def test_add_resources():
   assert Units.resources_sum(Resources(), Resources()) == Resources(cpu=0, ram=0, disk=0)
@@ -77,9 +75,9 @@ def test_combine_tasks():
   r111 = Units.resources_sum(r100, r010, r001)
 
   t1 = Task(name="p1p2", processes=[p1, p2], constraints=order(p1, p2),
-            resources=Units.resources_sum(r100, r010))
+            resources=Units.resources_sum(r100, r010), finalization_wait=60)
   t2 = Task(name="p3p4", processes=[p3, p4], constraints=order(p3, p4),
-            resources=r001)
+            resources=r001, finalization_wait=45)
 
   assert combine_tasks() == Task()
   assert combine_tasks(t1) == t1
@@ -90,6 +88,7 @@ def test_combine_tasks():
   assert t3.resources() == r111
   assert set(t3.processes()) == set([p1, p2, p3, p4])
   assert set(t3.constraints()) == set(order(p1, p2) + order(p3, p4))
+  assert t3.finalization_wait().get() == t1.finalization_wait().get()
 
   t4 = concat_tasks(t1, t2)
   assert t4.name() == t2.name()
@@ -98,6 +97,7 @@ def test_combine_tasks():
   assert set(t4.constraints()) == set(
       order(p1, p2) + order(p3, p4) + order(p1, p3) + order(p1, p4) +
       order(p2, p3) + order(p2, p4))
+  assert t4.finalization_wait().get() == t1.finalization_wait().get() + t2.finalization_wait().get()
 
 
 def test_simple_task():
@@ -122,14 +122,13 @@ def test_tasklets():
   recipe_ruby19 = SequentialTask(processes=[install_thermosrc, setup_ruby19])
   recipe_php = SequentialTask(processes=[install_thermosrc, setup_php])
   all_recipes = Tasks.combine(recipe_py3k, recipe_ruby19, recipe_php)
-  my_task = Task(processes = [Process(name='my_process')])
-  my_new_task = Tasks.concat(all_recipes, my_task)(name = 'my_task')
+  my_task = Task(processes=[Process(name='my_process')])
+  my_new_task = Tasks.concat(all_recipes, my_task)(name='my_task')
 
   # TODO(wickman) Probably should have Tasks.combine/concat do constraint
   # minimization since many constraints are redundant.
   for p in (install_thermosrc, setup_py3k, setup_ruby19, setup_php):
     assert p in my_new_task.processes()
-
 
 
 def test_render_options():

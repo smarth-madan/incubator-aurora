@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -16,39 +14,24 @@
 
 from abc import abstractmethod, abstractproperty
 
+from mesos.interface.mesos_pb2 import TaskState
 from twitter.common import log
 from twitter.common.lang import Interface
-from twitter.common.metrics import NamedGauge, Observable
-
-
-# This mirrors mesos_pb2 TaskStatus without explicitly depending upon it.
-#
-# The dependency is a 30MB egg, so for smaller applications that just need
-# the status text, we proxy them.  The actual conversion betwen ExitState
-# and TaskStatus is done in the StatusManager.
-class ExitState(object):
-  FAILED = object()
-  FINISHED = object()
-  KILLED = object()
-  LOST = object()
-
-  ALL_STATES = {
-    FAILED: 'FAILED',
-    FINISHED: 'FINISHED',
-    KILLED: 'KILLED',
-    LOST: 'LOST',
-  }
+from twitter.common.metrics import Observable
 
 
 class StatusResult(object):
   """
-    Encapsulates a reason for failure and an optional reason which defaults to
-    ExitState.FAILED.
+    Encapsulates a reason for failure and a status value from mesos.interface.mesos_pb2.TaskStatus.
+    As mesos 0.20.0 uses protobuf 2.5.0, see the EnumTypeWrapper[1] docs for more information.
+
+    https://code.google.com/p/protobuf/source/browse/tags/2.5.0/
+        python/google/protobuf/internal/enum_type_wrapper.py
   """
 
   def __init__(self, reason, status):
     self._reason = reason
-    if status not in ExitState.ALL_STATES:
+    if status not in TaskState.values():
       raise ValueError('Unknown task state: %r' % status)
     self._status = status
 
@@ -64,7 +47,7 @@ class StatusResult(object):
     return '%s(%r, status=%r)' % (
         self.__class__.__name__,
         self._reason,
-        ExitState.ALL_STATES[self._status])
+        TaskState.Name(self._status))
 
 
 class StatusChecker(Observable, Interface):
@@ -80,7 +63,7 @@ class StatusChecker(Observable, Interface):
 
   def start(self):
     """Invoked once the task has been started."""
-    self.metrics.register(NamedGauge('enabled', 1))
+    pass
 
   def stop(self):
     """Invoked once a non-None status has been reported."""

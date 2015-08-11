@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,27 +12,23 @@
 # limitations under the License.
 #
 
-from apache.aurora.common.cluster import Cluster
-
-from pystachio import (
-    Default,
-    Integer,
-    Required,
-    String)
 import pytest
+from pystachio import Default, Integer, Required, String
+
+from apache.aurora.common.cluster import Cluster
 
 
 def test_simple():
   class AudubonTrait(Cluster.Trait):
-    master_role = String
-    slave_role  = Default(String, 'slave')
-    version     = Required(Integer)
+    master_role = String  # noqa
+    slave_role  = Default(String, 'slave')  # noqa
+    version     = Required(Integer)  # noqa
 
-  west = Cluster(name = 'west',
-                 master_role = 'west.master',
-                 slave_role = 'west.slave',
-                 version = 10)
-  east = Cluster(name = 'east', version = 11)
+  west = Cluster(name='west',
+                 master_role='west.master',
+                 slave_role='west.slave',
+                 version=10)
+  east = Cluster(name='east', version=11)
 
   assert east.name == 'east'
   with pytest.raises(AttributeError):
@@ -45,4 +39,4 @@ def test_simple():
 
   with pytest.raises(TypeError):
     # requires version at least
-    Cluster(name = 'east').with_traits(AudubonTrait)
+    Cluster(name='east').with_traits(AudubonTrait)

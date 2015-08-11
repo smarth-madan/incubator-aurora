@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -18,11 +16,17 @@ package org.apache.aurora.scheduler.storage;
 import java.util.Set;
 
 import com.google.common.base.Function;
+import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableSet;
 
+import org.apache.aurora.gen.TaskQuery;
 import org.apache.aurora.scheduler.base.Query;
+import org.apache.aurora.scheduler.base.Tasks;
+import org.apache.aurora.scheduler.storage.entities.IJobKey;
 import org.apache.aurora.scheduler.storage.entities.IScheduledTask;
 import org.apache.aurora.scheduler.storage.entities.ITaskConfig;
+
+import static com.google.common.base.CharMatcher.WHITESPACE;
 
 /**
  * Stores all tasks configured with the scheduler.
@@ -36,14 +40,21 @@ public interface TaskStore {
    * @param query Builder of the query to identify tasks with.
    * @return A read-only view of matching tasks.
    */
-  ImmutableSet<IScheduledTask> fetchTasks(Query.Builder query);
+  Iterable<IScheduledTask> fetchTasks(Query.Builder query);
 
-  public interface Mutable extends TaskStore {
+  /**
+   * Fetches all job keys represented in the task store.
+   *
+   * @return Job keys of stored tasks.
+   */
+  Set<IJobKey> getJobKeys();
+
+  interface Mutable extends TaskStore {
 
     /**
      * A convenience interface to allow callers to more concisely implement a task mutation.
      */
-    public interface TaskMutation extends Function<IScheduledTask, IScheduledTask> {
+    interface TaskMutation extends Function<IScheduledTask, IScheduledTask> {
     }
 
     /**
@@ -99,5 +110,56 @@ public interface TaskStore {
      *         exist in the store.
      */
     boolean unsafeModifyInPlace(String taskId, ITaskConfig taskConfiguration);
+  }
+
+  final class Util {
+    private Util() {
+      // Utility class.
+    }
+
+    public static Predicate<IScheduledTask> queryFilter(final Query.Builder queryBuilder) {
+      return new Predicate<IScheduledTask>() {
+        @Override
+        public boolean apply(IScheduledTask task) {
+          TaskQuery query = queryBuilder.get();
+          ITaskConfig config = task.getAssignedTask().getTask();
+          // TODO(wfarner): Investigate why blank inputs are treated specially for the role field.
+          if (query.getRole() != null
+              && !WHITESPACE.matchesAllOf(query.getRole())
+              && !query.getRole().equals(config.getJob().getRole())) {
+            return false;
+          }
+          if (query.getEnvironment() != null
+              && !query.getEnvironment().equals(config.getEnvironment())) {
+            return false;
+          }
+          if (query.getJobName() != null && !query.getJobName().equals(config.getJobName())) {
+            return false;
+          }
+
+          if (query.getJobKeysSize() > 0
+              && !query.getJobKeys().contains(config.getJob().newBuilder())) {
+            return false;
+          }
+          if (query.getTaskIds() != null && !query.getTaskIds().contains(Tasks.id(task))) {
+            return false;
+          }
+
+          if (query.getStatusesSize() > 0 && !query.getStatuses().contains(task.getStatus())) {
+            return false;
+          }
+          if (query.getSlaveHostsSize() > 0
+              && !query.getSlaveHosts().contains(task.getAssignedTask().getSlaveHost())) {
+            return false;
+          }
+          if (query.getInstanceIdsSize() > 0
+              && !query.getInstanceIds().contains(task.getAssignedTask().getInstanceId())) {
+            return false;
+          }
+
+          return true;
+        }
+      };
+    }
   }
 }

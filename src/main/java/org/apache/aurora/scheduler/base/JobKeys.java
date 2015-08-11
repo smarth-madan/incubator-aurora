@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,20 +13,20 @@
  */
 package org.apache.aurora.scheduler.base;
 
+import java.util.List;
 import java.util.Set;
+
 import javax.annotation.Nullable;
 
-import com.google.common.base.Function;
-import com.google.common.base.Functions;
 import com.google.common.base.Optional;
-import com.google.common.base.Strings;
+import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.aurora.gen.JobKey;
 import org.apache.aurora.gen.TaskQuery;
+import org.apache.aurora.scheduler.configuration.ConfigurationManager;
 import org.apache.aurora.scheduler.storage.entities.IJobConfiguration;
 import org.apache.aurora.scheduler.storage.entities.IJobKey;
-import org.apache.aurora.scheduler.storage.entities.ITaskConfig;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
@@ -40,40 +38,9 @@ public final class JobKeys {
     // Utility class.
   }
 
-  public static final Function<IJobConfiguration, IJobKey> FROM_CONFIG =
-      new Function<IJobConfiguration, IJobKey>() {
-        @Override
-        public IJobKey apply(IJobConfiguration job) {
-          return job.getKey();
-        }
-      };
-
-  public static final Function<IJobKey, String> TO_ROLE =
-      new Function<IJobKey, String>() {
-        @Override
-        public String apply(IJobKey jobKey) {
-          return jobKey.getRole();
-        }
-      };
-
-  public static final Function<IJobKey, String> TO_ENVIRONMENT =
-      new Function<IJobKey, String>() {
-        @Override
-        public String apply(IJobKey jobKey) {
-          return jobKey.getEnvironment();
-        }
-      };
-
-  public static final Function<IJobKey, String> TO_JOB_NAME =
-      new Function<IJobKey, String>() {
-        @Override
-        public String apply(IJobKey jobKey) {
-          return jobKey.getName();
-        }
-      };
-
-  public static final Function<IJobConfiguration, String> CONFIG_TO_ROLE =
-      Functions.compose(TO_ROLE, FROM_CONFIG);
+  public static String getRole(IJobConfiguration jobConfiguration) {
+    return jobConfiguration.getKey().getRole();
+  }
 
   /**
    * Check that a jobKey struct is valid.
@@ -83,9 +50,9 @@ public final class JobKeys {
    */
   public static boolean isValid(@Nullable IJobKey jobKey) {
     return jobKey != null
-        && !Strings.isNullOrEmpty(jobKey.getRole())
-        && !Strings.isNullOrEmpty(jobKey.getEnvironment())
-        && !Strings.isNullOrEmpty(jobKey.getName());
+        && ConfigurationManager.isGoodIdentifier(jobKey.getRole())
+        && ConfigurationManager.isGoodIdentifier(jobKey.getEnvironment())
+        && ConfigurationManager.isGoodIdentifier(jobKey.getName());
   }
 
   /**
@@ -121,36 +88,32 @@ public final class JobKeys {
   }
 
   /**
-   * Attempts to create a valid JobKey from the given task.
+   * Create a "/"-delimited representation of job key usable as a unique identifier in this cluster.
    *
-   * @param task The task to create job key from.
-   * @return A valid JobKey if it can be created.
-   * @throws IllegalArgumentException if the key fails to validate.
-   */
-  public static IJobKey from(ITaskConfig task) throws IllegalArgumentException {
-    return from(task.getOwner().getRole(), task.getEnvironment(), task.getJobName());
-  }
-
-  /**
-   * Create a "/"-delimited String representation of a job key, suitable for logging but not
-   * necessarily suitable for use as a unique identifier.
+   * It is guaranteed that {@code k.equals(JobKeys.parse(JobKeys.canonicalString(k))}.
    *
+   * @see #parse(String)
    * @param jobKey Key to represent.
-   * @return "/"-delimited representation of the key.
+   * @return Canonical "/"-delimited representation of the key.
    */
-  public static String toPath(IJobKey jobKey) {
-    return jobKey.getRole() + "/" + jobKey.getEnvironment() + "/" + jobKey.getName();
+  public static String canonicalString(IJobKey jobKey) {
+    return String.join("/", jobKey.getRole(), jobKey.getEnvironment(), jobKey.getName());
   }
 
   /**
-   * Create a "/"-delimited String representation of job key, suitable for logging but not
-   * necessarily suitable for use as a unique identifier.
+   * Create a job key from a "role/environment/name" representation.
    *
-   * @param job Job to represent.
-   * @return "/"-delimited representation of the job's key.
+   * It is guaranteed that {@code k.equals(JobKeys.parse(JobKeys.canonicalString(k))}.
+   *
+   * @see #canonicalString(IJobKey)
+   * @param string Input to parse.
+   * @return Parsed representation.
+   * @throws IllegalArgumentException when the string fails to parse.
    */
-  public static String toPath(IJobConfiguration job) {
-    return toPath(job.getKey());
+  public static IJobKey parse(String string) throws IllegalArgumentException {
+    List<String> components = Splitter.on("/").splitToList(string);
+    checkArgument(components.size() == 3);
+    return from(components.get(0), components.get(1), components.get(2));
   }
 
   /**
@@ -166,7 +129,7 @@ public final class JobKeys {
 
       if (taskQuery.isSetJobName()) {
         builder.add(from(
-            taskQuery.getOwner().getRole(),
+            taskQuery.getRole(),
             taskQuery.getEnvironment(),
             taskQuery.getJobName()));
       }

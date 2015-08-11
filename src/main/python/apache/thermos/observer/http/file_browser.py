@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -15,16 +13,13 @@
 #
 
 import os
-import pprint
 from xml.sax.saxutils import escape
 
-from .templating import HttpTemplate
-
 import bottle
-from mako.template import Template
 from twitter.common import log
 from twitter.common.http import HttpServer
 
+from .templating import HttpTemplate
 
 MB = 1024 * 1024
 DEFAULT_CHUNK_LENGTH = MB
@@ -82,7 +77,7 @@ class TaskObserverFileBrowser(object):
     if logtype not in types:
       bottle.abort(404, "No such log type: %s" % logtype)
     base, path = types[logtype]
-    filename = os.path.join(base, path)
+    _, filename = self._observer.valid_path(task_id, os.path.join(base, path))
     return {
       'task_id': task_id,
       'filename': filename,
@@ -129,6 +124,8 @@ class TaskObserverFileBrowser(object):
     if path == "":
       path = None
     chroot, path = self._observer.valid_path(task_id, path)
+    if chroot is None or path is None:
+      bottle.abort(404, "Sandbox does not exist.")
     return dict(task_id=task_id, chroot=chroot, path=path)
 
   @HttpServer.route("/download/:task_id/:path#.+#")

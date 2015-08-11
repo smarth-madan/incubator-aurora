@@ -1,6 +1,4 @@
 /**
- * Copyright 2013 Apache Software Foundation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -51,5 +49,16 @@ public class ThriftBinaryCodecTest {
   @Test(expected = NullPointerException.class)
   public void testDecodeNonNull() throws CodingException {
     ThriftBinaryCodec.decodeNonNull(Identity.class, null);
+  }
+
+  @Test
+  public void testInflateDeflateRoundTrip() throws CodingException {
+    Identity original = new Identity("aurora", "jsmith");
+
+    byte[] deflated = ThriftBinaryCodec.deflateNonNull(original);
+
+    Identity inflated = ThriftBinaryCodec.inflateNonNull(Identity.class, deflated);
+
+    assertEquals(original, inflated);
   }
 }

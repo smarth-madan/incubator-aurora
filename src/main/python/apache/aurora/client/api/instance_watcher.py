@@ -1,6 +1,4 @@
 #
-# Copyright 2013 Apache Software Foundation
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -15,17 +13,14 @@
 #
 
 import time
-
-from gen.apache.aurora.ttypes import (
-  Identity,
-  ResponseCode,
-  ScheduleStatus,
-  TaskQuery,
-)
-
-from .health_check import InstanceWatcherHealthCheck
+from threading import Event
 
 from twitter.common import log
+
+from .health_check import StatusHealthCheck
+from .task_util import StatusMuxHelper
+
+from gen.apache.aurora.api.ttypes import ScheduleStatus, TaskQuery
 
 
 class Instance(object):
@@ -49,7 +44,9 @@ class InstanceWatcher(object):
                restart_threshold,
                watch_secs,
                health_check_interval_seconds,
-               clock=time):
+               clock=time,
+               terminating_event=None,
+               scheduler_mux=None):
 
     self._scheduler = scheduler
     self._job_key = job_key
@@ -57,6 +54,8 @@ class InstanceWatcher(object):
     self._watch_secs = watch_secs
     self._health_check_interval_seconds = health_check_interval_seconds
     self._clock = clock
+    self._terminating = terminating_event or Event()
+    self._status_helper = StatusMuxHelper(self._scheduler, self._create_query, scheduler_mux)
 
   def watch(self, instance_ids, health_check=None):
     """Watches a set of instances and detects failures based on a delegated health check.
@@ -68,7 +67,7 @@ class InstanceWatcher(object):
     """
     log.info('Watching instances: %s' % instance_ids)
     instance_ids = set(instance_ids)
-    health_check = health_check or InstanceWatcherHealthCheck()
+    health_check = health_check or StatusHealthCheck()
     now = self._clock.time()
     expected_healthy_by = now + self._restart_threshold
     max_time = now + self._restart_threshold + self._watch_secs
@@ -98,8 +97,8 @@ class InstanceWatcher(object):
           instance_id, self._restart_threshold))
         instance_states[instance_id] = Instance(finished=True)
 
-    while True:
-      running_tasks = self._get_tasks_by_instance_id(instance_ids)
+    while not self._terminating.is_set():
+      running_tasks = self._status_helper.get_tasks(instance_ids)
       now = self._clock.time()
       tasks_by_instance = dict((task.assignedTask.instanceId, task) for task in running_tasks)
       for instance_id in instance_ids:
@@ -126,27 +125,15 @@ class InstanceWatcher(object):
         return set([s_id for s_id in instance_ids if s_id not in instance_states
                                              or not instance_states[s_id].healthy])
 
-      self._clock.sleep(self._health_check_interval_seconds)
+      self._terminating.wait(self._health_check_interval_seconds)
 
-  def _get_tasks_by_instance_id(self, instance_ids):
-    log.debug('Querying instance statuses.')
+  def terminate(self):
+    """Requests immediate termination of the watch cycle."""
+    self._terminating.set()
+
+  def _create_query(self, instance_ids):
     query = TaskQuery()
-    query.owner = Identity(role=self._job_key.role)
-    query.environment = self._job_key.environment
-    query.jobName = self._job_key.name
+    query.jobKeys = set([self._job_key])
     query.statuses = set([ScheduleStatus.RUNNING])
-
     query.instanceIds = instance_ids
-    try:
-      resp = self._scheduler.getTasksStatus(query)
-    except IOError as e:
-      log.error('IO Exception during scheduler call: %s' % e)
-      return []
-
-    tasks = []
-    if resp.responseCode == ResponseCode.OK:
-      tasks = resp.result.scheduleStatusResult.tasks
-
-    log.debug('Response from scheduler: %s (message: %s)'
-        % (ResponseCode._VALUES_TO_NAMES[resp.responseCode], resp.message))
-    return tasks
+    return query
